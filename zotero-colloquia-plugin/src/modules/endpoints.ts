@@ -350,6 +350,270 @@ class SearchLibraryEndpoint {
 }
 
 // ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/createAnnotation
+// ---------------------------------------------------------------------------
+
+/** Shape of a single rect: [x1, y1, x2, y2]. */
+type AnnotationRect = [number, number, number, number];
+
+interface CreateAnnotationBody {
+  parentItemKey: string;
+  annotationType: "highlight" | "image" | "note";
+  pageIndex: number;
+  rects: AnnotationRect[];
+  comment: string;
+  color?: string;
+}
+
+/** Default page dimensions in PDF points (8.5 x 11 inches). */
+const DEFAULT_PAGE_WIDTH = 612;
+const DEFAULT_PAGE_HEIGHT = 792;
+
+class CreateAnnotationEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body: CreateAnnotationBody = parseBody(request.data) as CreateAnnotationBody;
+      const { parentItemKey, annotationType, pageIndex, rects, comment, color } = body;
+
+      // --- Validate required fields ---
+      if (!parentItemKey || !annotationType || pageIndex === undefined || !rects || !comment) {
+        return jsonResponse(400, {
+          error: "Missing required fields: parentItemKey, annotationType, pageIndex, rects, comment",
+        });
+      }
+
+      if (!["highlight", "image", "note"].includes(annotationType)) {
+        return jsonResponse(400, {
+          error: `Invalid annotationType: ${annotationType}. Must be "highlight", "image", or "note".`,
+        });
+      }
+
+      if (!Array.isArray(rects) || rects.length === 0) {
+        return jsonResponse(400, {
+          error: "rects must be a non-empty array of [x1, y1, x2, y2] coordinates.",
+        });
+      }
+
+      // --- Validate coordinates ---
+      for (const rect of rects) {
+        if (!Array.isArray(rect) || rect.length !== 4) {
+          return jsonResponse(400, {
+            error: "Each rect must be an array of exactly 4 numbers [x1, y1, x2, y2].",
+          });
+        }
+
+        const [x1, y1, x2, y2]: AnnotationRect = rect;
+
+        // Reject all-zero bounding boxes
+        if (x1 === 0 && y1 === 0 && x2 === 0 && y2 === 0) {
+          return jsonResponse(400, {
+            error: "All-zero bounding box rejected. Coordinates must define a real region.",
+          });
+        }
+
+        // Reject coordinates exceeding page dimensions
+        for (const val of [x1, x2]) {
+          if (val < 0 || val > DEFAULT_PAGE_WIDTH) {
+            return jsonResponse(400, {
+              error: `X coordinate ${val} out of range [0, ${DEFAULT_PAGE_WIDTH}].`,
+            });
+          }
+        }
+        for (const val of [y1, y2]) {
+          if (val < 0 || val > DEFAULT_PAGE_HEIGHT) {
+            return jsonResponse(400, {
+              error: `Y coordinate ${val} out of range [0, ${DEFAULT_PAGE_HEIGHT}].`,
+            });
+          }
+        }
+      }
+
+      // --- Resolve parent PDF attachment ---
+      const parentItem = await Zotero.Items.getByLibraryAndKeyAsync(
+        Zotero.Libraries.userLibraryID,
+        parentItemKey,
+      );
+
+      if (!parentItem) {
+        return jsonResponse(404, {
+          error: `Item not found: ${parentItemKey}`,
+        });
+      }
+
+      let attachmentItem = parentItem;
+      if (!parentItem.isAttachment()) {
+        const attachmentIDs = parentItem.getAttachments();
+        const attachments = await Zotero.Items.getAsync(attachmentIDs);
+        const pdfAttachment = attachments.find(
+          (a: any) => a.attachmentContentType === "application/pdf",
+        );
+        if (!pdfAttachment) {
+          return jsonResponse(404, {
+            error: "No PDF attachment found for this item.",
+          });
+        }
+        attachmentItem = pdfAttachment;
+      }
+
+      // --- Compute sortIndex from first rect ---
+      // Format: "NNNNN|NNNNNN|NNNNN" (5|6|5 digits zero-padded)
+      const firstRect: AnnotationRect = rects[0];
+      const yPos: number = Math.round(firstRect[1]);
+      const xPos: number = Math.round(firstRect[0]);
+      const sortIndex: string = [
+        String(pageIndex).padStart(5, "0"),
+        String(yPos).padStart(6, "0"),
+        String(xPos).padStart(5, "0"),
+      ].join("|");
+
+      // --- Create annotation item ---
+      const annotation = new Zotero.Item("annotation");
+      annotation.libraryID = Zotero.Libraries.userLibraryID;
+      annotation.parentKey = attachmentItem.key;
+      annotation.annotationType = annotationType;
+      annotation.annotationComment = comment;
+      annotation.annotationColor = color || "#a28ae5"; // Colloquia purple
+      annotation.annotationPageLabel = String(pageIndex + 1); // 1-indexed
+      annotation.annotationPosition = JSON.stringify({
+        pageIndex,
+        rects,
+      });
+      (annotation as any).annotationSortIndex = sortIndex;
+
+      await annotation.saveTx();
+
+      // --- Trigger live refresh so annotation appears without reopening ---
+      try {
+        Zotero.Notifier.trigger("refresh", "item", [annotation.id], {});
+      } catch {
+        ztoolkit.log("createAnnotation: Notifier.trigger refresh failed, annotation still saved.");
+      }
+
+      return jsonResponse(200, { annotationKey: annotation.key });
+    } catch (e: any) {
+      ztoolkit.log(`createAnnotation error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/addPaper
+// ---------------------------------------------------------------------------
+
+interface AddPaperBody {
+  doi?: string;
+  title?: string;
+  authors?: string;
+  url?: string;
+  abstract?: string;
+  collectionKey?: string;
+}
+
+class AddPaperEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body: AddPaperBody = parseBody(request.data) as AddPaperBody;
+      const { doi, title, authors, url, abstract: paperAbstract, collectionKey } = body;
+
+      if (!doi && !title) {
+        return jsonResponse(400, {
+          error: "At least one of 'doi' or 'title' is required.",
+        });
+      }
+
+      let savedItem: any = null;
+
+      // Try DOI import first via Zotero.Translate.Search()
+      if (doi) {
+        try {
+          const translate = new Zotero.Translate.Search();
+          translate.setIdentifier({ DOI: doi });
+          const translators = await translate.getTranslators();
+
+          if (translators && translators.length > 0) {
+            translate.setTranslator(translators);
+            const items = await translate.translate({
+              libraryID: Zotero.Libraries.userLibraryID,
+            });
+            if (items && items.length > 0) {
+              savedItem = items[0];
+            }
+          }
+        } catch (e: any) {
+          ztoolkit.log(`addPaper DOI translate failed, using fallback: ${e.message}`);
+        }
+      }
+
+      // Fallback: create item manually with provided metadata
+      if (!savedItem) {
+        const item = new Zotero.Item("journalArticle");
+        item.libraryID = Zotero.Libraries.userLibraryID;
+
+        if (title) item.setField("title", title);
+        if (doi) item.setField("DOI", doi);
+        if (url) item.setField("url", url);
+        if (paperAbstract) item.setField("abstractNote", paperAbstract);
+
+        // Parse authors string "First Last, First Last" → creators
+        if (authors) {
+          const creatorList: Array<{ firstName: string; lastName: string; creatorType: "author" }> = [];
+          for (const name of authors.split(",")) {
+            const trimmed: string = name.trim();
+            if (!trimmed) continue;
+            const parts: string[] = trimmed.split(/\s+/);
+            const lastName: string = parts.pop() || trimmed;
+            const firstName: string = parts.join(" ");
+            creatorList.push({
+              firstName,
+              lastName,
+              creatorType: "author",
+            });
+          }
+          item.setCreators(creatorList);
+        }
+
+        await item.saveTx();
+        savedItem = item;
+      }
+
+      // Add to collection if specified
+      if (collectionKey && savedItem) {
+        const collection = await Zotero.Collections.getByLibraryAndKeyAsync(
+          Zotero.Libraries.userLibraryID,
+          collectionKey,
+        );
+        if (collection) {
+          collection.addItem(savedItem.id);
+          await collection.saveTx();
+        }
+      }
+
+      const resultTitle: string = savedItem?.getField?.("title") || title || "Unknown";
+      return jsonResponse(200, {
+        itemKey: savedItem.key,
+        title: resultTitle,
+      });
+    } catch (e: any) {
+      ztoolkit.log(`addPaper error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Endpoint: POST /colloquia/test-doi-import (Phase 3.2a verification)
 // ---------------------------------------------------------------------------
 
@@ -539,6 +803,8 @@ export function registerEndpoints(): void {
     "/colloquia/removeTags": RemoveTagsEndpoint,
     "/colloquia/addRelated": AddRelatedEndpoint,
     "/colloquia/searchLibrary": SearchLibraryEndpoint,
+    "/colloquia/createAnnotation": CreateAnnotationEndpoint,
+    "/colloquia/addPaper": AddPaperEndpoint,
     "/colloquia/test-doi-import": TestDoiImportEndpoint,
     "/colloquia/test-annotation": TestAnnotationEndpoint,
   };

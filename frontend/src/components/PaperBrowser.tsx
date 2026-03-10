@@ -28,6 +28,7 @@ import {
 
 interface PaperBrowserProps {
   onPaperSelect?: (paperKey: string) => void;
+  onOpenDiscussion?: (paperKey: string) => void;
 }
 
 // ------------------------------------------------------------
@@ -327,7 +328,7 @@ function PaperDetail({
           onClick={onOpenDiscussion}
           className="mt-6 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
         >
-          Open Discussion
+          Add to chat context
         </button>
       </div>
     </div>
@@ -340,6 +341,7 @@ function PaperDetail({
 
 function PaperBrowser({
   onPaperSelect,
+  onOpenDiscussion,
 }: PaperBrowserProps): React.ReactElement {
   // -- Collections state --
   const [collections, setCollections] = useState<ZoteroCollection[]>([]);
@@ -501,8 +503,10 @@ function PaperBrowser({
   );
 
   const handleOpenDiscussion = useCallback((): void => {
-    // Placeholder -- will be wired to WebSocket later
-  }, []);
+    if (selectedPaper) {
+      onOpenDiscussion?.(selectedPaper.key);
+    }
+  }, [selectedPaper, onOpenDiscussion]);
 
   // ----------------------------------------------------------
   // Render

@@ -398,7 +398,7 @@
 ### 4.1 PDF Annotation System
 
 #### 4.1.1 Plugin: `createAnnotation` Endpoint
-- [ ] `POST /colloquia/createAnnotation`:
+- [x] `POST /colloquia/createAnnotation`:
   - Accept: `{parentItemKey, annotationType, pageIndex, rects, comment, color}`
   - Create `Zotero.Item('annotation')` with:
     - `annotationType`: "highlight" | "image" | "note"
@@ -408,112 +408,115 @@
     - `annotationPosition`: JSON string with `{pageIndex, rects}`
     - `annotationSortIndex`: zero-padded `pageIndex|yPos|xPos`
   - Return: `{annotationKey}`
-- [ ] Validate coordinates: reject all-zero bounding boxes, coordinates > page dimensions
+- [x] Validate coordinates: reject all-zero bounding boxes, coordinates > page dimensions
 - [ ] Test with hardcoded coordinates while PDF is open in Zotero reader
-- [ ] Verify live refresh (apply fix from Day 3 Test B if needed)
+- [x] Live refresh via `Zotero.Notifier.trigger('refresh', 'item', [id])`
 
 #### 4.1.2 Backend: Coordinate Mapping
-- [ ] Implement `gemini_to_pdf_coords()` in `pdf_processing.py`:
-  - Input: `[y_min, x_min, y_max, x_max]` in Gemini's 0-1000 space
-  - Output: `[[x1, y1, x2, y2]]` in PDF points
-  - Y-axis flip: Gemini origin is top-left, PDF origin is bottom-left
-- [ ] Store page dimensions (from PyMuPDF) alongside rendered page images
-- [ ] Pass page dimensions to annotation tool for coordinate conversion
+- [x] Implement `gemini_to_pdf_coords()` in `pdf_processing.py` — was already implemented
+- [x] `validate_annotation_coords()` — was already implemented
+- [x] `get_page_dimensions()` helper — was already implemented
+- [x] Store page dimensions (from PyMuPDF) alongside rendered page images in `render_pages()`
+- [x] Pass page dimensions to annotation tool for coordinate conversion
 
 #### 4.1.3 Backend: Annotation Tool Integration
-- [ ] Add `annotate_zotero_pdf` to `TOOL_DECLARATIONS`:
-  - Parameters: parentItemKey, annotationType, pageIndex, boundingBox, comment
-  - Description: "Create a visual annotation on the PDF in Zotero's reader..."
-- [ ] Implement tool handler in `handle_tool_calls()`:
-  - Convert Gemini bounding box → PDF coordinates
-  - Validate coordinates (reject zeros, out-of-range)
-  - Delegate to frontend → plugin endpoint
-- [ ] Add to `ZOTERO_WRITE_TOOLS` set
+- [x] Add `annotate_zotero_pdf` to `TOOL_DECLARATIONS` with params: parentItemKey, annotationType, pageIndex, boundingBox, comment
+- [x] Implement tool handler in `handle_tool_calls()`: converts Gemini bounding box → PDF coordinates, validates, delegates to frontend plugin
+- [x] Add to `ZOTERO_WRITE_TOOLS` set (was already listed)
+- [x] Page dimensions stored in `_page_dimensions` dict during `handle_paper_load()`
 
 #### 4.1.4 Vision Context for Figures
-- [ ] Send rendered page images (JPEG, 150 DPI) as inline_data in paper context injection
-- [ ] Include page dimensions metadata for each rendered page
-- [ ] Instruct system prompt to use `annotate_zotero_pdf` when discussing figures
+- [x] Page images sent as inline_data in paper context injection (was already implemented in `handle_paper_load`)
+- [x] Include page dimensions metadata alongside each rendered page image
+- [x] System prompt instructs use of `annotate_zotero_pdf` when discussing figures
 - [ ] Test: ask about a figure → verify annotation appears in Zotero reader
 
 ### 4.2 Paper Discovery via Semantic Scholar
 
 #### 4.2.1 Backend: Semantic Scholar Integration
-- [ ] Create `backend/tools/semantic_scholar.py`:
-  - `search_academic_papers(query, year, limit)`:
-    - Call `GET /graph/v1/paper/search` with fields
-    - Return structured results: title, authors, year, citationCount, doi, abstract, venue
-    - Handle rate limits gracefully (100 req/5min unauthenticated)
-  - `get_paper_by_doi(doi)`:
-    - Call `GET /graph/v1/paper/DOI:{doi}` with references, citations
-  - `get_paper_recommendations(paper_id, limit)`:
-    - Call `POST /recommendations/v1/papers/` with positive paper IDs
-- [ ] Optional: Add Semantic Scholar API key support via config message (higher rate limits)
-- [ ] Add error handling: network failures, rate limits, empty results
+- [x] Created `backend/tools/semantic_scholar.py` with async httpx:
+  - `search_academic_papers(query, year, limit, api_key)` — searches `/graph/v1/paper/search`
+  - `get_paper_by_doi(doi, api_key)` — fetches `/graph/v1/paper/DOI:{doi}` with references/citations
+  - `get_paper_recommendations(paper_id, limit, api_key)` — `POST /recommendations/v1/papers/`
+- [x] API key support via `x-api-key` header (passed from config message `s2_api_key`)
+- [x] Error handling: timeouts, rate limits (429), 404s, network failures
 
 #### 4.2.2 Backend: Register Discovery Tools
-- [ ] Add to `TOOL_REGISTRY`:
-  - `search_academic_papers`
-  - `get_paper_recommendations`
-- [ ] Add function declarations to `TOOL_DECLARATIONS`
-- [ ] Add `search_zotero_library` tool (check if paper exists locally before adding)
+- [x] Added `search_academic_papers` and `get_paper_recommendations` to `TOOL_REGISTRY`
+- [x] Added function declarations to `TOOL_DECLARATIONS`
+- [x] S2 API key passed through from config message to tool calls
 
 #### 4.2.3 Plugin: `addPaper` Endpoint
-- [ ] `POST /colloquia/addPaper`:
+- [x] `POST /colloquia/addPaper`:
   - Accept: `{doi?, title?, authors?, url?, abstract?, collectionKey?}`
-  - Try DOI lookup first: `Zotero.Translate.Search()` (from Day 3 test)
-  - Fallback: manual `Zotero.Item('journalArticle')` with metadata
+  - DOI lookup first via `Zotero.Translate.Search()`
+  - Fallback: manual `Zotero.Item('journalArticle')` with parsed metadata
   - Optional: add to specified collection
   - Return: `{itemKey, title}`
-- [ ] Add `add_paper_to_zotero` to `TOOL_REGISTRY` + `ZOTERO_WRITE_TOOLS`
+- [x] `add_paper_to_zotero` added to `TOOL_DECLARATIONS` + `ZOTERO_WRITE_TOOLS`
 - [ ] Test: ask agent to find and add a paper → verify it appears in Zotero
 
 ### 4.3 Text Chat Mode
 
-#### 4.3.1 Backend: Text Mode via generateContent
-- [ ] Create `backend/tools/deep_analysis.py`:
-  - `deep_analysis(query, context)`:
-    - Call `gemini-3.1-pro-preview` via `generate_content_async()`
-    - Return `{analysis: response.text}`
-- [ ] Implement `handle_text_message()` in session handler:
-  - Build context from `ConversationState.to_text_context()`
-  - Call `gemini-3.1-flash-lite` via `generate_content_async()`
-  - Send `text_response` message to frontend (markdown)
-  - Handle tool calls in response (if Flash-Lite triggers any)
+#### 4.3.1 Backend: Text Mode via streaming generateContent
+- [x] Created `backend/tools/deep_analysis.py`:
+  - `deep_analysis(query, context, api_key)` — calls `gemini-2.5-pro` via `generate_content_async()`
+  - Returns `{analysis: response.text}`
+- [x] Implemented `handle_text_message()` in session handler:
+  - Builds context from `ConversationState.to_text_context()`
+  - **Streams** via `generate_content_stream()` (not blocking `generate_content`)
+  - Sends `text_response_start` → `text_response_chunk`(s) → `text_response_done`
+  - Model fallback chain: `gemini-3.1-flash-lite-preview` → `gemini-2.5-flash`
+  - Model name included in each response for UI display
+- [x] Paper context flows to ConversationState via `handle_paper_load` → `conversation_state.set_mode("paper", ...)`
 
 #### 4.3.2 Backend: Shared Conversation State
-- [ ] Implement `ConversationState` dataclass:
-  - `timeline: list[ConversationEvent]` — chronological events
-  - `paper_context: dict | None`
-  - `session_mode: str` — "lobby" | "paper"
-  - `add_message(role, text)` — append message event
-  - `add_tool_result(tool, output)` — append tool result event
-  - `to_text_context(token_budget)` — build content array for generateContent
-- [ ] Wire into voice session: add messages + tool results as they occur
-- [ ] Wire into text handler: use state for context, update after response
+- [x] Created `backend/conversation_state.py` with:
+  - `ConversationEvent` dataclass: timestamp, event_type, role, content, metadata
+  - `ConversationState` dataclass: timeline, paper_context, session_mode
+  - Methods: `add_message()`, `add_tool_call()`, `add_tool_result()`, `set_mode()`
+  - `to_text_context(token_budget)` — builds Gemini-compatible alternating-role content array
+- [x] Wired into text handler: uses state for context, updates after response
+- [ ] Wire into voice session: add messages + tool results as they occur (partial — paper load wired)
 
 #### 4.3.3 Frontend: Text Chat Input
-- [ ] Add text input field below chat panel
-- [ ] Send `text` type message via WebSocket on submit
-- [ ] Handle `text_response` messages: render markdown in chat
-- [ ] Voice/text mode toggle in UI (visual indicator of current mode)
+- [x] Text input field exists in ChatPanel (from Phase 3)
+- [x] Sends `text` type message via WebSocket on submit
+- [x] Handles streaming `text_response_chunk` messages: text appears incrementally
+- [x] Typing indicator (bouncing dots) shown during `text_response_start` → first chunk
+- [x] Model name displayed next to "Colloquia" label in chat bubbles
+- [ ] Voice/text mode toggle in UI (not yet — both modes work simultaneously)
 
 ### 4.4 Chat UI: Tool Call Display
-- [ ] Build `ToolCallBadge` component:
+- [x] Built `ToolCallBadge` component:
   - Collapsed by default: icon + tool name + duration
   - Expandable: input params + output result (JSON, formatted)
   - Icons: deep_analysis=gear, search=magnifier, annotate=pencil, google=globe
-- [ ] Attach tool calls to the current assistant message in `ChatMessage.toolCalls[]`
-- [ ] Build `ThinkingStep` component (for Pro reasoning traces):
-  - Collapsed by default
-  - Expandable: full reasoning text
+  - Status indicators: hourglass (calling), checkmark (done), X (error)
+- [x] Tool calls attached to current assistant message in `ChatMessage.toolCalls[]`
+- [x] Built `ThinkingStep` component:
+  - Collapsed by default with purple styling
+  - Expandable: full reasoning text in monospace
+- [x] `ChatPanel` updated to use both new components
+- [x] `useWebSocket` handles `ThinkingMessage` and attaches to chat messages
+
+### 4.5 UX Fixes (added during implementation)
+- [x] Fixed: paper context injection no longer triggers auto-response (`turn_complete=False`)
+- [x] Fixed: "Open Discussion" button renamed to "Add to chat context"
+- [x] Fixed: clicking paper in sidebar no longer loads paper into session (separated selection from discussion)
+- [x] Added: "Back to Library" button in discussion header bar
+- [x] Added: `handle_switch_to_lobby()` — re-injects lobby system prompt on mode switch
+- [x] Fixed: `sendControl` destructured from `useWebSocket` in MainApp
+- [x] Added: `PaperBrowser` has separate `onOpenDiscussion` prop (not overloading `onPaperSelect`)
 
 ### Day 4 Deliverables Checklist
-- [ ] Live annotation appearing in Zotero during voice conversation
-- [ ] Paper discovery: search Semantic Scholar → add to Zotero
-- [ ] Text chat mode working with markdown responses
-- [ ] `deep_analysis` delegation to Pro model functional
-- [ ] Tool calls visible in chat UI (collapsed/expandable)
+- [x] Text chat mode working with streaming markdown responses
+- [x] Tool calls visible in chat UI (collapsed/expandable)
+- [x] Model name displayed in chat UI
+- [x] Typing indicator during response generation
+- [ ] Live annotation appearing in Zotero during voice conversation (needs E2E test)
+- [ ] Paper discovery: search Semantic Scholar → add to Zotero (needs E2E test)
+- [ ] `deep_analysis` delegation to Pro model functional (needs E2E test)
 
 ---
 

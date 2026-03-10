@@ -4,6 +4,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import type { ChatMessage } from "../hooks/useWebSocket";
+import ToolCallBadge from "./ToolCallBadge";
+import ThinkingStep from "./ThinkingStep";
 
 interface ChatPanelProps {
   messages: ChatMessage[];
@@ -89,25 +91,41 @@ function ChatPanel({
                 >
                   {msg.role === "user" ? "You" : "Colloquia"}
                 </span>
+                {msg.model && msg.role === "model" && (
+                  <span className="text-[9px] font-mono text-gray-300">
+                    {msg.model}
+                  </span>
+                )}
               </div>
-              <p className="whitespace-pre-wrap">{msg.text}</p>
-              {/* Tool calls (collapsed) */}
+              {msg.isStreaming && !msg.text ? (
+                <span className="inline-flex items-center gap-1 text-gray-400">
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
+                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
+                </span>
+              ) : (
+                <p className="whitespace-pre-wrap">{msg.text}</p>
+              )}
+              {/* Thinking trace */}
+              {msg.thinking && (
+                <ThinkingStep
+                  content={msg.thinking.content}
+                  durationMs={msg.thinking.durationMs}
+                />
+              )}
+              {/* Tool calls (collapsed/expandable) */}
               {msg.toolCalls && msg.toolCalls.length > 0 && (
                 <div className="mt-1.5 space-y-1">
-                  {msg.toolCalls.map((tc, idx) => (
-                    <div
+                  {msg.toolCalls.map((tc, idx: number) => (
+                    <ToolCallBadge
                       key={idx}
-                      className="flex items-center gap-1 rounded bg-gray-200/50 px-2 py-0.5 text-[10px] text-gray-500"
-                    >
-                      <span className="font-mono">{tc.toolName}</span>
-                      <span>
-                        {tc.status === "calling"
-                          ? "..."
-                          : tc.status === "done"
-                            ? `(${tc.durationMs ?? 0}ms)`
-                            : "failed"}
-                      </span>
-                    </div>
+                      toolName={tc.toolName}
+                      status={tc.status}
+                      durationMs={tc.durationMs}
+                      input={tc.input}
+                      output={tc.output}
+                      error={tc.error}
+                    />
                   ))}
                 </div>
               )}

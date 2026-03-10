@@ -112,10 +112,29 @@ export interface TranscriptMessage {
   isFinal: boolean;
 }
 
-/** Text response (text mode, markdown) */
+/** Signal that text generation has started (show typing indicator) */
+export interface TextResponseStartMessage {
+  type: "text_response_start";
+}
+
+/** Streaming text chunk */
+export interface TextResponseChunkMessage {
+  type: "text_response_chunk";
+  content: string;
+  model?: string;
+}
+
+/** Signal that text generation is complete */
+export interface TextResponseDoneMessage {
+  type: "text_response_done";
+  model?: string;
+}
+
+/** @deprecated Full text response (kept for backwards compat) */
 export interface TextResponseMessage {
   type: "text_response";
   content: string;
+  model?: string;
 }
 
 /** Zotero write command (backend -> frontend to execute locally) */
@@ -166,6 +185,9 @@ export interface SessionStatusMessage {
 export type ServerMessage =
   | ServerAudioMessage
   | TranscriptMessage
+  | TextResponseStartMessage
+  | TextResponseChunkMessage
+  | TextResponseDoneMessage
   | TextResponseMessage
   | ZoteroActionMessage
   | ToolCallMessage

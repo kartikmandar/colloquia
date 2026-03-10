@@ -11,8 +11,10 @@ import { getFallbackUrl } from "../lib/backendUrl";
 import type {
   ServerMessage,
   TranscriptMessage,
-  TextResponseMessage,
+  TextResponseChunkMessage,
+  TextResponseDoneMessage,
   ToolCallMessage,
+  ThinkingMessage,
   ContextUsageMessage,
   SessionStatusMessage,
   ZoteroActionMessage,
@@ -27,6 +29,9 @@ export interface ChatMessage {
   mode: "voice" | "text";
   timestamp: number;
   toolCalls?: ToolCallMessage[];
+  thinking?: { content: string; durationMs?: number };
+  model?: string;
+  isStreaming?: boolean;
 }
 
 interface UseWebSocketOptions {
@@ -184,9 +189,57 @@ export function useWebSocket({
           break;
         }
 
+        case "text_response_start": {
+          // Add an empty model message as a typing placeholder
+          const placeholderMsg: ChatMessage = {
+            id: nextMessageId(),
+            role: "model",
+            text: "",
+            mode: "text",
+            timestamp: Date.now(),
+            isStreaming: true,
+          };
+          setMessages((prev: ChatMessage[]) => [...prev, placeholderMsg]);
+          break;
+        }
+
+        case "text_response_chunk": {
+          const chunk: TextResponseChunkMessage = data;
+          setMessages((prev: ChatMessage[]) => {
+            const updated: ChatMessage[] = [...prev];
+            const last: ChatMessage | undefined = updated[updated.length - 1];
+            if (last && last.role === "model" && last.isStreaming) {
+              updated[updated.length - 1] = {
+                ...last,
+                text: last.text + chunk.content,
+                model: chunk.model ?? last.model,
+              };
+            }
+            return updated;
+          });
+          break;
+        }
+
+        case "text_response_done": {
+          const done: TextResponseDoneMessage = data;
+          setMessages((prev: ChatMessage[]) => {
+            const updated: ChatMessage[] = [...prev];
+            const last: ChatMessage | undefined = updated[updated.length - 1];
+            if (last && last.role === "model" && last.isStreaming) {
+              updated[updated.length - 1] = {
+                ...last,
+                isStreaming: false,
+                model: done.model ?? last.model,
+              };
+            }
+            return updated;
+          });
+          break;
+        }
+
         case "text_response": {
-          const tr: TextResponseMessage = data;
-          addMessage("model", tr.content, "text");
+          // Legacy non-streaming fallback
+          addMessage("model", data.content, "text");
           break;
         }
 
@@ -205,8 +258,23 @@ export function useWebSocket({
           break;
         }
 
-        case "thinking":
+        case "thinking": {
+          const th: ThinkingMessage = data;
+          setMessages((prev: ChatMessage[]) => {
+            const updated: ChatMessage[] = [...prev];
+            const lastModel: ChatMessage | undefined = [...updated]
+              .reverse()
+              .find((m: ChatMessage) => m.role === "model");
+            if (lastModel) {
+              lastModel.thinking = {
+                content: th.content,
+                durationMs: lastModel.thinking?.durationMs,
+              };
+            }
+            return updated;
+          });
           break;
+        }
 
         case "zotero_action": {
           const za: ZoteroActionMessage = data;

@@ -18,6 +18,13 @@ from google.genai import types
 
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
+from tools.pdf_processing import gemini_to_pdf_coords, validate_annotation_coords
+from tools.semantic_scholar import (
+    search_academic_papers,
+    get_paper_recommendations,
+)
+from tools.deep_analysis import deep_analysis
+from conversation_state import ConversationState
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -32,6 +39,8 @@ async def echo_tool(message: str = "") -> dict[str, str]:
 
 TOOL_REGISTRY: dict[str, Any] = {
     "echo": echo_tool,
+    "search_academic_papers": search_academic_papers,
+    "get_paper_recommendations": get_paper_recommendations,
 }
 
 TOOL_DECLARATIONS: list[types.FunctionDeclaration] = [
@@ -150,6 +159,128 @@ TOOL_DECLARATIONS: list[types.FunctionDeclaration] = [
             required=["itemKey1", "itemKey2"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="annotate_zotero_pdf",
+        description=(
+            "Create a visual annotation on the PDF in Zotero's reader. "
+            "Use this when discussing a specific figure, equation, table, or text region "
+            "to highlight it for the user. Annotations appear live in Zotero."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "parentItemKey": types.Schema(
+                    type=types.Type.STRING,
+                    description="Zotero item key of the PDF attachment or parent item",
+                ),
+                "annotationType": types.Schema(
+                    type=types.Type.STRING,
+                    description="Type of annotation: 'highlight', 'image', or 'note'",
+                ),
+                "pageIndex": types.Schema(
+                    type=types.Type.INTEGER,
+                    description="Zero-indexed page number",
+                ),
+                "boundingBox": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.INTEGER),
+                    description=(
+                        "Bounding box as [y_min, x_min, y_max, x_max] in 0-1000 coordinate space. "
+                        "Origin is top-left. Will be converted to PDF coordinates."
+                    ),
+                ),
+                "comment": types.Schema(
+                    type=types.Type.STRING,
+                    description="Text comment for the annotation",
+                ),
+            },
+            required=["parentItemKey", "annotationType", "pageIndex", "boundingBox", "comment"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="search_academic_papers",
+        description=(
+            "Search Semantic Scholar for academic papers by query. "
+            "Returns titles, authors, years, citation counts, DOIs, and abstracts. "
+            "Use this to help users discover papers not in their Zotero library."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "query": types.Schema(
+                    type=types.Type.STRING,
+                    description="Search query (keywords, topic, etc.)",
+                ),
+                "year": types.Schema(
+                    type=types.Type.STRING,
+                    description="Year range filter, e.g. '2020-2024' or '2023'",
+                ),
+                "limit": types.Schema(
+                    type=types.Type.INTEGER,
+                    description="Max results to return (default 5, max 100)",
+                ),
+            },
+            required=["query"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="get_paper_recommendations",
+        description=(
+            "Get paper recommendations based on a seed paper from Semantic Scholar. "
+            "Provide the Semantic Scholar paper ID to find similar papers."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "paper_id": types.Schema(
+                    type=types.Type.STRING,
+                    description="Semantic Scholar paper ID (or 'DOI:10.xxx/yyy' format)",
+                ),
+                "limit": types.Schema(
+                    type=types.Type.INTEGER,
+                    description="Max recommendations to return (default 5)",
+                ),
+            },
+            required=["paper_id"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="add_paper_to_zotero",
+        description=(
+            "Add a discovered paper to the user's Zotero library. "
+            "Provide a DOI for best results (automatic metadata lookup). "
+            "Always confirm with the user before adding."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "doi": types.Schema(
+                    type=types.Type.STRING,
+                    description="Paper DOI for automatic metadata import",
+                ),
+                "title": types.Schema(
+                    type=types.Type.STRING,
+                    description="Paper title (fallback if DOI lookup fails)",
+                ),
+                "authors": types.Schema(
+                    type=types.Type.STRING,
+                    description="Comma-separated author names (fallback)",
+                ),
+                "url": types.Schema(
+                    type=types.Type.STRING,
+                    description="Paper URL (fallback)",
+                ),
+                "abstract": types.Schema(
+                    type=types.Type.STRING,
+                    description="Paper abstract (fallback)",
+                ),
+                "collectionKey": types.Schema(
+                    type=types.Type.STRING,
+                    description="Optional Zotero collection key to add the paper to",
+                ),
+            },
+        ),
+    ),
 ]
 
 # Zotero tools that need to be delegated to the frontend
@@ -168,6 +299,10 @@ ZOTERO_WRITE_TOOLS: set[str] = {
 # Per-session registry of pending Zotero write operations
 # Key: request_id, Value: asyncio.Future
 _pending_zotero: dict[str, asyncio.Future[dict[str, Any]]] = {}
+
+# Per-session page dimensions from loaded PDF (populated by handle_paper_load)
+# Key: page_index (0-based), Value: {"width": float, "height": float}
+_page_dimensions: dict[int, dict[str, float]] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +345,8 @@ async def run_session(
     session_request_ids: set[str] = set()
     resumption_handle: str | None = None
     api_key: str = config_msg["gemini_api_key"]
+    s2_api_key: str | None = config_msg.get("s2_api_key")
+    conversation_state: ConversationState = ConversationState()
 
     live_config: types.LiveConnectConfig = build_live_config()
 
@@ -235,17 +372,14 @@ async def run_session(
                     )
 
                 elif msg_type == "text":
-                    content: str = raw.get("content", "")
-                    await session.send_client_content(
-                        turns=types.Content(
-                            role="user",
-                            parts=[types.Part(text=content)],
-                        ),
-                        turn_complete=True,
+                    text_content: str = raw.get("content", "")
+                    # Route text through the generateContent text handler
+                    await handle_text_message(
+                        ws, text_content, api_key, conversation_state
                     )
 
                 elif msg_type == "paper_context":
-                    await handle_paper_load(ws, session, raw)
+                    await handle_paper_load(ws, session, raw, conversation_state)
 
                 elif msg_type == "zotero_action_result":
                     resolve_zotero_result(raw)
@@ -253,6 +387,9 @@ async def run_session(
                 elif msg_type == "control":
                     action: str = raw.get("action", "")
                     logger.info("Control message: %s", action)
+                    if action == "switch_mode" and raw.get("mode") == "lobby":
+                        await handle_switch_to_lobby(session)
+                        _page_dimensions.clear()
 
         async def forward_gemini_to_user() -> None:
             """Read from Gemini Live session, handle tool calls, forward to frontend."""
@@ -272,6 +409,7 @@ async def run_session(
                     await handle_tool_calls(
                         ws, session, message.tool_call,
                         session_request_ids, api_key,
+                        s2_api_key=s2_api_key,
                     )
 
                 # Server content (transcripts, interruptions)
@@ -358,6 +496,7 @@ async def handle_paper_load(
     ws: WebSocket,
     session: Any,
     raw: dict[str, Any],
+    conversation_state: ConversationState | None = None,
 ) -> None:
     """Load a paper into the session, swapping to paper mode.
 
@@ -379,6 +518,15 @@ async def handle_paper_load(
         len(annotations),
         len(page_images),
     )
+
+    # Store page dimensions for annotation coordinate conversion
+    _page_dimensions.clear()
+    for page_img in page_images:
+        idx: int = page_img.get("pageIndex", 0)
+        _page_dimensions[idx] = {
+            "width": float(page_img.get("width", 612)),
+            "height": float(page_img.get("height", 792)),
+        }
 
     # Build annotation summary for the prompt
     annotation_summary: str = ""
@@ -412,12 +560,13 @@ async def handle_paper_load(
     )
 
     # Swap system prompt via send_client_content with role="system"
+    # turn_complete=False so Gemini doesn't auto-respond to context injection
     await session.send_client_content(
         turns=types.Content(
             role="user",
             parts=[types.Part(text=f"[SYSTEM INSTRUCTION UPDATE]\n\n{paper_prompt}")],
         ),
-        turn_complete=True,
+        turn_complete=False,
     )
 
     # Inject paper fulltext as a user turn
@@ -438,8 +587,17 @@ async def handle_paper_load(
         image_b64: str = page_img.get("data", page_img.get("imageBase64", ""))
         page_idx: int = page_img.get("pageIndex", 0)
         if image_b64:
+            img_width: float = float(page_img.get("width", 612))
+            img_height: float = float(page_img.get("height", 792))
             context_parts.append(
-                types.Part(text=f"[PAGE {page_idx + 1} IMAGE]")
+                types.Part(
+                    text=(
+                        f"[PAGE {page_idx + 1} IMAGE — "
+                        f"dimensions: {img_width:.0f}x{img_height:.0f} pts, "
+                        f"pageIndex={page_idx}. "
+                        f"Use annotate_zotero_pdf with this pageIndex to annotate regions.]"
+                    )
+                )
             )
             context_parts.append(
                 types.Part(
@@ -456,7 +614,7 @@ async def handle_paper_load(
                 role="user",
                 parts=context_parts,
             ),
-            turn_complete=True,
+            turn_complete=False,
         )
 
     # Notify frontend that paper is loaded
@@ -465,7 +623,34 @@ async def handle_paper_load(
         "status": "connected",
     })
 
+    # Update conversation state with paper context
+    if conversation_state is not None:
+        conversation_state.set_mode("paper", paper_context={
+            "title": metadata.get("title", ""),
+            "authors": ", ".join(metadata.get("authors", [])),
+            "year": str(metadata.get("year", "")),
+            "doi": metadata.get("doi", ""),
+            "fulltext": fulltext[:10000] if fulltext else "",
+            "annotation_count": len(annotations),
+        })
+
     logger.info("Paper loaded successfully: %s", metadata.get("title", paper_key))
+
+
+# ---------------------------------------------------------------------------
+# Switch back to lobby mode
+# ---------------------------------------------------------------------------
+
+async def handle_switch_to_lobby(session: Any) -> None:
+    """Switch the session back to lobby mode by re-injecting the lobby prompt."""
+    await session.send_client_content(
+        turns=types.Content(
+            role="user",
+            parts=[types.Part(text=f"[SYSTEM INSTRUCTION UPDATE]\n\n{LOBBY_SYSTEM_PROMPT}")],
+        ),
+        turn_complete=False,
+    )
+    logger.info("Switched back to lobby mode")
 
 
 # ---------------------------------------------------------------------------
@@ -478,6 +663,7 @@ async def handle_tool_calls(
     tool_call: Any,
     session_request_ids: set[str],
     api_key: str,
+    s2_api_key: str | None = None,
 ) -> None:
     """Execute tool calls and send responses back to Gemini."""
     responses: list[types.FunctionResponse] = []
@@ -510,6 +696,37 @@ async def handle_tool_calls(
                 )
                 result: dict[str, Any] = {"answer": search_resp.text}
 
+            elif fc.name == "annotate_zotero_pdf":
+                # Convert Gemini bounding box → PDF rects before delegating
+                bbox: list[int] = fc.args.get("boundingBox", [0, 0, 0, 0])
+                page_idx: int = fc.args.get("pageIndex", 0)
+
+                # Use stored page dimensions or defaults (8.5x11 inches)
+                page_width: float = _page_dimensions.get(page_idx, {}).get("width", 612.0)
+                page_height: float = _page_dimensions.get(page_idx, {}).get("height", 792.0)
+
+                # Validate input bbox
+                is_valid, validation_msg = validate_annotation_coords(
+                    bbox, page_width, page_height
+                )
+                if not is_valid:
+                    result = {"error": f"Invalid annotation coordinates: {validation_msg}"}
+                else:
+                    pdf_rects: list[list[float]] = gemini_to_pdf_coords(
+                        bbox, page_width, page_height
+                    )
+                    # Build params for the plugin endpoint
+                    annotation_params: dict[str, Any] = {
+                        "parentItemKey": fc.args.get("parentItemKey", ""),
+                        "annotationType": fc.args.get("annotationType", "image"),
+                        "pageIndex": page_idx,
+                        "rects": pdf_rects,
+                        "comment": fc.args.get("comment", ""),
+                    }
+                    result = await delegate_to_frontend(
+                        ws, "createAnnotation", annotation_params, session_request_ids
+                    )
+
             elif fc.name in ZOTERO_WRITE_TOOLS:
                 result = await delegate_to_frontend(
                     ws, fc.name, fc.args, session_request_ids
@@ -517,7 +734,11 @@ async def handle_tool_calls(
 
             elif fc.name in TOOL_REGISTRY:
                 tool_fn = TOOL_REGISTRY[fc.name]
-                result = await tool_fn(**fc.args)
+                # Inject api_key for tools that need it
+                call_args: dict[str, Any] = dict(fc.args)
+                if fc.name in ("search_academic_papers", "get_paper_recommendations"):
+                    call_args["api_key"] = s2_api_key
+                result = await tool_fn(**call_args)
 
             else:
                 result = {
@@ -615,3 +836,116 @@ def resolve_zotero_result(msg: dict[str, Any]) -> None:
             future.set_exception(
                 ToolError(msg.get("error", "Unknown Zotero error"))
             )
+
+
+# ---------------------------------------------------------------------------
+# Text chat mode — uses generateContent (non-streaming)
+# ---------------------------------------------------------------------------
+
+TEXT_MODEL: str = "gemini-3.1-flash-lite-preview"
+TEXT_MODEL_FALLBACK: str = "gemini-2.5-flash"
+
+
+async def handle_text_message(
+    ws: WebSocket,
+    content: str,
+    api_key: str,
+    conversation_state: ConversationState,
+) -> None:
+    """Handle a text chat message via streaming generateContent API.
+
+    Builds context from ConversationState, streams response chunks to the
+    frontend as text_response_chunk messages, then sends a text_response_done.
+    """
+    conversation_state.add_message("user", content)
+
+    # Notify frontend that we're generating a response
+    await ws.send_json({"type": "text_response_start"})
+
+    try:
+        client: genai.Client = genai.Client(
+            api_key=api_key,
+            http_options={"timeout": 30000},
+        )
+
+        # Build context from conversation history
+        context_contents: list[dict[str, Any]] = conversation_state.to_text_context(
+            token_budget=30000
+        )
+
+        # Build system instruction based on mode
+        if conversation_state.session_mode == "paper" and conversation_state.paper_context:
+            ctx: dict[str, Any] = conversation_state.paper_context
+            system_instruction: str = (
+                f"You are Colloquia, an AI research assistant. "
+                f"You are currently discussing the paper: {ctx.get('title', 'Unknown')} "
+                f"by {ctx.get('authors', 'Unknown')} ({ctx.get('year', '')}).\n"
+                f"Provide helpful, precise responses in markdown format. "
+                f"When deep analysis is needed, say so explicitly."
+            )
+        else:
+            system_instruction = (
+                "You are Colloquia, an AI research assistant for managing "
+                "and discussing academic papers in Zotero. "
+                "Respond helpfully in markdown format."
+            )
+
+        full_text: str = ""
+        used_model: str = TEXT_MODEL
+        streamed: bool = False
+
+        for model_name in (TEXT_MODEL, TEXT_MODEL_FALLBACK):
+            try:
+                logger.info("Trying text model: %s", model_name)
+                stream = await client.aio.models.generate_content_stream(
+                    model=model_name,
+                    contents=context_contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system_instruction,
+                        temperature=0.7,
+                        max_output_tokens=2048,
+                    ),
+                )
+                used_model = model_name
+                async for chunk in stream:
+                    chunk_text: str = chunk.text or ""
+                    if chunk_text:
+                        full_text += chunk_text
+                        await ws.send_json({
+                            "type": "text_response_chunk",
+                            "content": chunk_text,
+                            "model": model_name,
+                        })
+                streamed = True
+                break
+            except Exception as model_err:
+                logger.warning(
+                    "Text model %s failed: %s: %s",
+                    model_name, type(model_err).__name__, str(model_err),
+                )
+                if model_name == TEXT_MODEL_FALLBACK:
+                    raise
+
+        if not full_text:
+            full_text = "I couldn't generate a response."
+            await ws.send_json({
+                "type": "text_response_chunk",
+                "content": full_text,
+                "model": used_model,
+            })
+
+        conversation_state.add_message("assistant", full_text)
+
+        # Signal end of stream
+        await ws.send_json({
+            "type": "text_response_done",
+            "model": used_model,
+        })
+
+    except Exception as e:
+        logger.error("Text message handling failed: %s", str(e))
+        error_msg: str = f"Text response failed: {str(e)}"
+        await ws.send_json({
+            "type": "error",
+            "message": error_msg,
+        })

@@ -70,6 +70,7 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     sendAudio,
     sendText,
     sendPaperContext,
+    sendControl,
   } = useWebSocket({
     url: wsUrl,
     onAudioData: handleAudioFromServer,
@@ -88,11 +89,17 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
   });
 
   const handlePaperSelect = useCallback(
-    async (paperKey: string): Promise<void> => {
+    (paperKey: string): void => {
       setSelectedPaperKey(paperKey);
+    },
+    [],
+  );
 
+  const handleOpenDiscussion = useCallback(
+    async (paperKey: string): Promise<void> => {
       if (!isConnected) return;
 
+      setSelectedPaperKey(paperKey);
       setPaperLoading(true);
       try {
         const result: LoadPaperResult = await loadPaper(paperKey);
@@ -106,6 +113,11 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     },
     [isConnected, sendPaperContext],
   );
+
+  const handleBackToLibrary = useCallback((): void => {
+    setLoadedPaperTitle(null);
+    sendControl("switch_mode", "lobby");
+  }, [sendControl]);
 
   const handleMicToggle = useCallback(async (): Promise<void> => {
     if (isCapturing) {
@@ -184,7 +196,7 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
       <main className="flex flex-1 overflow-hidden">
         {/* Left: Paper browser */}
         <div className="flex-1 overflow-hidden border-r border-gray-200 p-4">
-          <PaperBrowser onPaperSelect={handlePaperSelect} />
+          <PaperBrowser onPaperSelect={handlePaperSelect} onOpenDiscussion={handleOpenDiscussion} />
         </div>
 
         {/* Right: Chat + voice panel */}
@@ -200,10 +212,16 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
             </div>
           )}
           {loadedPaperTitle && !paperLoading && (
-            <div className="flex items-center gap-2 border-b border-purple-100 bg-purple-50 px-4 py-2 text-xs text-purple-700">
+            <div className="flex items-center justify-between border-b border-purple-100 bg-purple-50 px-4 py-2 text-xs text-purple-700">
               <span className="font-medium truncate" title={loadedPaperTitle}>
                 Discussing: {loadedPaperTitle}
               </span>
+              <button
+                onClick={handleBackToLibrary}
+                className="ml-2 shrink-0 rounded px-2 py-0.5 text-[10px] font-medium text-purple-600 transition-colors hover:bg-purple-200"
+              >
+                Back to Library
+              </button>
             </div>
           )}
           {/* Chat messages */}
