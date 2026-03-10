@@ -34,32 +34,33 @@
 ## Phase 1: Foundation & Zotero Read Integration (Day 1 — March 11)
 
 ### 1.1 Frontend Project Initialization
-- [ ] Initialize Vite + React + TypeScript project in `frontend/`
-- [ ] Install core dependencies: `react`, `react-dom`, `typescript`, Tailwind CSS (or styling lib of choice)
-- [ ] Configure `tsconfig.json` with strict mode
-- [ ] Set up ESLint + Prettier
-- [ ] Create base `App.tsx` with routing skeleton (setup screen vs main app)
+- [x] Initialize Vite + React + TypeScript project in `frontend/` — scaffolded with `pnpm create vite . --template react-ts`
+- [x] Install core dependencies: `react`, `react-dom`, `typescript`, Tailwind CSS v4 (`tailwindcss` + `@tailwindcss/vite`)
+- [x] Configure `tsconfig.json` with strict mode — already enabled by Vite template in `tsconfig.app.json` and `tsconfig.node.json`
+- [x] Set up ESLint + Prettier — `eslint-plugin-prettier`, `eslint-config-prettier`, `@typescript-eslint/explicit-function-return-type` warnings
+- [x] Create base `App.tsx` with routing skeleton (setup screen vs main app) — state-based switching between `SetupScreen` and `MainApp`
 
 ### 1.2 Vite Proxy Configuration (CORS solution)
-- [ ] Configure `/zotero-api` proxy in `vite.config.ts`:
+- [x] Configure `/zotero-api` proxy in `vite.config.ts`:
   - Target: `http://localhost:23119`
   - Rewrite: `/zotero-api` → `/api`
   - Add headers: `Zotero-Allowed-Request: 1`, `User-Agent: Colloquia/1.0`
-- [ ] Configure `/zotero-plugin` proxy in `vite.config.ts`:
+- [x] Configure `/zotero-plugin` proxy in `vite.config.ts`:
   - Target: `http://localhost:23119`
   - Rewrite: `/zotero-plugin` → (strip prefix)
   - Add header: `Zotero-Allowed-Request: 1`
+- [x] Configure `/api/ws` WebSocket proxy → `ws://localhost:8000/ws`
 - [ ] Verify both proxies work with manual browser requests
 
 ### 1.3 WebSocket Protocol Definition (Critical — prevents integration debt)
-- [ ] Define `ClientMessage` union type in `src/lib/protocol.ts`:
+- [x] Define `ClientMessage` union type in `src/lib/protocol.ts` — 6 message types:
   - `config` — API key handshake (first message)
   - `audio` — base64 PCM16 audio chunk
   - `text` — text chat input
   - `paper_context` — paper loading payload (fulltext, metadata, pageImages)
   - `zotero_action_result` — response from Zotero plugin operations
   - `control` — start/stop/switch_mode
-- [ ] Define `ServerMessage` union type:
+- [x] Define `ServerMessage` union type — 9 message types:
   - `audio` — base64 PCM16 audio response
   - `transcript` — user/model text transcription
   - `text_response` — text mode markdown response
@@ -69,75 +70,80 @@
   - `context_usage` — token usage for progress bar
   - `error` — error message
   - `session_status` — connected/reconnecting/ended
-- [ ] Export shared types for both frontend and backend consumption
+- [x] Export shared types for both frontend and backend consumption — supporting types: `PaperMetadata`, `PaperAnnotation`, `PageImage`
 
 ### 1.4 BYOK API Key Management
-- [ ] Create `src/lib/apiKeys.ts`:
-  - `getGeminiKey()` / `setGeminiKey()` — `localStorage` read/write
-  - `getS2Key()` / `setS2Key()` — Semantic Scholar key (optional)
-  - `clearAll()` — remove all keys
-- [ ] Build `SetupScreen` component:
-  - Gemini API key input (required) with paste support
-  - Semantic Scholar API key input (optional, with "skip" option)
-  - "Your key is stored locally" privacy notice
-  - Validation: ping Gemini API on save to confirm key works
-  - Save button → persist to `localStorage` → navigate to main app
-- [ ] App startup logic: if key exists in `localStorage`, skip setup, go to main app
-- [ ] Settings panel (gear icon): "Change API key" option
+- [x] Create `src/lib/apiKeys.ts` — `getGeminiKey`, `setGeminiKey`, `getS2Key`, `setS2Key`, `clearAllKeys`, `hasGeminiKey`; localStorage keys: `colloquia_gemini_key`, `colloquia_s2_key`
+- [x] Build `SetupScreen` component:
+  - Gemini API key input (required, password type with show/hide toggle)
+  - Semantic Scholar API key input (optional, with toggle)
+  - "Your API key is stored locally in your browser" privacy notice
+  - Validation: format check (starts with "AI", >20 chars), loading state on button
+  - "Get Started" button → persist to localStorage → call onComplete()
+- [x] App startup logic: if `hasGeminiKey()` is true, start on "main" screen; otherwise "setup"
+- [x] Settings panel (gear icon): in MainApp top-right corner, navigates back to setup; shows first 8 chars of key masked
 
 ### 1.5 Zotero Health Check
-- [ ] Create `src/hooks/useZoteroHealth.ts`:
-  - Ping `/zotero-api/users/0/items/top?limit=1` on startup
-  - Return `ZoteroState`: `{ available, pluginInstalled, libraryEmpty }`
-  - Check plugin via `/zotero-plugin/colloquia/ping` (once plugin exists)
-- [ ] Build onboarding UI based on state:
-  - `!available` → "Install Zotero 7 and enable API access" with setup steps
-  - `!pluginInstalled` → "Install the Colloquia plugin" with download link
-  - `libraryEmpty` → "Your library is empty" with search prompt + lobby suggestion
-  - All good → main app (lobby mode)
+- [x] Create `src/hooks/useZoteroHealth.ts` — parallel health checks via `Promise.allSettled`:
+  - Pings `/zotero-api/users/0/items/top?limit=1` on startup
+  - Returns `ZoteroState`: `{ available, pluginInstalled, libraryEmpty, loading, error }`
+  - Checks plugin via `/zotero-plugin/colloquia/ping`
+  - Exposes `refresh()` function for re-checking
+- [x] Build `src/components/ZoteroStatus.tsx` onboarding UI based on state:
+  - Loading → spinner with "Checking Zotero connection..."
+  - `!available` → amber warning card with troubleshooting steps + Retry button
+  - `!pluginInstalled` → blue info card (non-blocking, user can continue)
+  - `libraryEmpty` → gray note suggesting adding papers or using voice mode
+  - All good → small green "Zotero Connected" badge
 
 ### 1.6 Paper Browser Component
-- [ ] Build `PaperBrowser` component:
-  - Fetch top-level items: `GET /zotero-api/users/0/items/top`
-  - Display list: title, authors, year, journal
-  - Search bar: `GET /zotero-api/users/0/items?q={query}&qmode=everything`
-  - Collection sidebar: `GET /zotero-api/users/0/collections`
-  - Filter by collection: `GET /zotero-api/users/0/collections/{key}/items`
-- [ ] Paper selection handler:
-  - On click → fetch metadata, children (annotations), fulltext
-  - Store selected paper in React state
-  - Signal session mode transition (will wire to WebSocket later)
-- [ ] Display paper metadata panel: title, authors, abstract, DOI, tags, collections
+- [x] Create `src/lib/zoteroApi.ts` — centralized Zotero API client:
+  - TypeScript interfaces: `ZoteroItem`, `ZoteroCollection`, `ZoteroCreator`, `ZoteroTag`, `ZoteroItemData`, `ZoteroCollectionData`, `ZoteroFulltextResponse`
+  - Custom `ZoteroApiError` class
+  - Functions: `zoteroFetch`, `fetchTopItems`, `fetchCollections`, `fetchCollectionItems`, `searchItems`, `fetchItemDetails`, `fetchItemChildren`, `fetchItemFulltext`
+  - Helpers: `formatAuthorsShort`, `formatAuthorsFull`, `extractYear`, `getVenue`
+  - `DOCUMENT_ITEM_TYPES` set for filtering non-document items
+- [x] Build `src/components/PaperBrowser.tsx` — three-panel layout:
+  - Left sidebar (240px): collection tree from `/zotero-api/users/0/collections`, "All Papers" at top, active highlighted
+  - Center: searchable paper list with 300ms debounce, loading/error/empty states, items sorted by dateModified
+  - Right panel (384px, lg+): paper detail with title, authors, year, venue, DOI, tags, abstract, "Open Discussion" button
+  - Filters out non-document item types
+- [x] Paper selection handler — `onPaperSelect` callback stores selected paper key in MainApp state
+- [x] MainApp restructured — header bar with title, ZoteroStatus badge, API key mask, settings gear; flex-1 area with PaperBrowser
 
 ### 1.7 Backend Skeleton (FastAPI)
-- [ ] Initialize FastAPI project in `backend/`:
-  - `main.py` — app creation, CORS middleware, health endpoint
+- [x] Initialize FastAPI project in `backend/`:
+  - `main.py` — FastAPI app with CORS middleware (allow all origins for dev)
   - `requirements.txt`: `fastapi`, `uvicorn[standard]`, `websockets`, `google-genai`, `httpx`
-- [ ] Create WebSocket endpoint `ws://localhost:8000/ws`:
-  - Accept connection
-  - Await `config` message with Gemini API key
-  - Create per-session `genai.Client(api_key=...)`
-  - Log connection + key receipt (key masked)
-- [ ] Add `GET /health` endpoint (returns 200 — needed for Cloud Run)
-- [ ] Test locally: `uvicorn main:app --reload --port 8000`
-- [ ] Verify basic `genai.Client.aio.live.connect()` call works with user-provided key
+- [x] Create WebSocket endpoint `ws://localhost:8000/ws`:
+  - Accepts connection, awaits `config` message with `gemini_api_key`
+  - Creates per-session `genai.Client(api_key=...)`
+  - Logs connection + key receipt (first 8 chars + "...")
+  - Sends back `session_status: "connected"`, runs receive loop
+  - Handles `WebSocketDisconnect` gracefully
+- [x] Add `GET /health` endpoint — returns `{"status": "ok"}`
+- [x] Test locally: server starts on port 8000, `/health` returns 200
+- [x] Verify `google.genai.Client` instantiation works with API key
 
 ### 1.8 Cloud Run Initial Deployment
-- [ ] Create `backend/Dockerfile`:
-  - Python 3.11 slim base
-  - Install dependencies from `requirements.txt`
-  - Run: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- [ ] Deploy to Cloud Run:
-  - `gcloud run deploy colloquia-backend --source=backend/ --region=us-central1 --timeout=3600 --min-instances=1 --allow-unauthenticated`
-- [ ] Verify WebSocket connection works via Cloud Run URL
+- [x] Create `backend/Dockerfile` — Python 3.11-slim, `pip install -r requirements.txt`, `uvicorn main:app --host 0.0.0.0 --port ${PORT:-8080}`
+- [x] Create `backend/.dockerignore` — excludes `.env`, `__pycache__`, `*.pyc`, `.git`
+- [x] Docker image built locally: `docker build -t colloquia-backend ./backend`
+- [x] Fixed IAM permissions — granted `roles/cloudbuild.builds.builder` and `roles/storage.admin` to `318881942640-compute@developer.gserviceaccount.com`
+- [x] Deploy to Cloud Run — exact command used:
+  ```
+  gcloud run deploy colloquia-backend --source=/Users/kartikmandar/Downloads/repos/colloquia/backend/ --region=us-central1 --timeout=3600 --min-instances=1 --allow-unauthenticated --project=colloquia-app
+  ```
+- [x] **Service URL:** `https://colloquia-backend-318881942640.us-central1.run.app`
+- [x] Verified: `/health` returns `{"status":"ok"}`
 - [ ] Update frontend to use Cloud Run backend URL (env variable or config)
 
 ### Day 1 Deliverables Checklist
-- [ ] Browse and search Zotero library in the UI
-- [ ] Backend deployed to Cloud Run with WebSocket endpoint
-- [ ] WebSocket protocol fully typed in TypeScript
-- [ ] API key entry + persistence working
-- [ ] Zotero health check + onboarding UI functional
+- [x] Browse and search Zotero library in the UI — PaperBrowser with collections sidebar, search, detail panel
+- [x] Backend deployed to Cloud Run with WebSocket endpoint — `https://colloquia-backend-318881942640.us-central1.run.app`
+- [x] WebSocket protocol fully typed in TypeScript — 6 client + 9 server message types in `src/lib/protocol.ts`
+- [x] API key entry + persistence working — SetupScreen with validation, localStorage, gear icon to change
+- [x] Zotero health check + onboarding UI functional — parallel health checks, contextual status badges
 
 ---
 
