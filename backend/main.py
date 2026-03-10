@@ -6,6 +6,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 
+from session_handler import run_session
+
 logging.basicConfig(level=logging.INFO)
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -37,7 +39,10 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
 
         api_key: str | None = config.get("gemini_api_key")
         if not api_key:
-            await websocket.send_json({"type": "error", "message": "Missing gemini_api_key in config"})
+            await websocket.send_json({
+                "type": "error",
+                "message": "Missing gemini_api_key in config",
+            })
             await websocket.close()
             return
 
@@ -49,19 +54,23 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         logger.info("Gemini client created for session")
 
         # Send session status
-        await websocket.send_json({"type": "session_status", "status": "connected"})
+        await websocket.send_json({
+            "type": "session_status",
+            "status": "connected",
+        })
 
-        # Basic receive loop
-        while True:
-            message: str = await websocket.receive_text()
-            data: dict[str, Any] = json.loads(message)
-            logger.info("Received message type: %s", data.get("type", "unknown"))
+        # Hand off to the session handler (Gemini Live API event loop)
+        await run_session(websocket, client, config)
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
     except Exception as e:
         logger.error("WebSocket error: %s", str(e))
         try:
+            await websocket.send_json({
+                "type": "error",
+                "message": str(e),
+            })
             await websocket.close()
         except Exception:
             pass

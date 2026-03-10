@@ -1,14 +1,29 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { getGeminiKey } from "../lib/apiKeys";
 import { useZoteroHealth } from "../hooks/useZoteroHealth";
+import { useWebSocket } from "../hooks/useWebSocket";
+import { useAudioCapture } from "../hooks/useAudioCapture";
+import { AudioStreamer } from "../lib/audio-streamer";
+import { resolveBackendUrl } from "../lib/backendUrl";
 import ZoteroStatus from "../components/ZoteroStatus";
 import PaperBrowser from "../components/PaperBrowser";
+import ConnectionBadge from "../components/ConnectionBadge";
+import ChatPanel from "../components/ChatPanel";
+import MicButton from "../components/MicButton";
 
 interface MainAppProps {
   onBackToSetup: () => void;
 }
 
 function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
+  const [wsUrl, setWsUrl] = useState<string>("ws://localhost:8000/ws");
+
+  // Resolve best backend URL on mount
+  useEffect(() => {
+    resolveBackendUrl().then((resolved: string) => {
+      setWsUrl(resolved);
+    });
+  }, []);
   const geminiKey: string | null = getGeminiKey();
   const maskedKey: string = geminiKey
     ? geminiKey.substring(0, 8).replace(/./g, "*")
@@ -16,13 +31,84 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
   const { state: zoteroState, refresh: zoteroRefresh } = useZoteroHealth();
 
   const [selectedPaperKey, setSelectedPaperKey] = useState<string | null>(null);
+  void selectedPaperKey;
+
+  // Audio playback context (24kHz for Gemini output)
+  const audioStreamerRef = useRef<AudioStreamer | null>(null);
+
+  const getAudioStreamer = useCallback((): AudioStreamer => {
+    if (!audioStreamerRef.current) {
+      const ctx: AudioContext = new AudioContext({ sampleRate: 24000 });
+      audioStreamerRef.current = new AudioStreamer(ctx);
+    }
+    return audioStreamerRef.current;
+  }, []);
+
+  const handleAudioFromServer = useCallback(
+    (base64Pcm: string): void => {
+      const streamer: AudioStreamer = getAudioStreamer();
+      const binaryString: string = atob(base64Pcm);
+      const bytes: Uint8Array = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      streamer.addPCM16(bytes);
+    },
+    [getAudioStreamer]
+  );
+
+  // WebSocket connection
+  const {
+    status,
+    messages,
+    activeUrl,
+    connect,
+    disconnect,
+    sendAudio,
+    sendText,
+  } = useWebSocket({
+    url: wsUrl,
+    onAudioData: handleAudioFromServer,
+  });
+
+  const isConnected: boolean = status === "connected";
+
+  // Audio capture (mic → WebSocket)
+  const {
+    isCapturing,
+    volume,
+    startCapture,
+    stopCapture,
+  } = useAudioCapture({
+    onAudioData: sendAudio,
+  });
 
   const handlePaperSelect = useCallback((paperKey: string): void => {
     setSelectedPaperKey(paperKey);
   }, []);
 
-  // selectedPaperKey will be used later to wire up WebSocket discussion mode
-  void selectedPaperKey;
+  const handleMicToggle = useCallback(async (): Promise<void> => {
+    if (isCapturing) {
+      stopCapture();
+    } else {
+      // Resume audio context for playback (requires user gesture)
+      const streamer: AudioStreamer = getAudioStreamer();
+      await streamer.resume();
+      await startCapture();
+    }
+  }, [isCapturing, startCapture, stopCapture, getAudioStreamer]);
+
+  const handleConnect = useCallback((): void => {
+    if (isConnected) {
+      // Stop mic if capturing
+      if (isCapturing) stopCapture();
+      // Stop audio playback
+      audioStreamerRef.current?.stop();
+      disconnect();
+    } else {
+      connect();
+    }
+  }, [isConnected, isCapturing, stopCapture, disconnect, connect]);
 
   return (
     <div className="flex h-screen flex-col">
@@ -31,6 +117,22 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
         <h1 className="text-lg font-bold text-gray-900">Colloquia</h1>
 
         <div className="flex items-center gap-3">
+          <ConnectionBadge status={status} />
+          {status !== "disconnected" && (
+            <span className="text-[10px] text-gray-400 max-w-32 truncate" title={activeUrl}>
+              {activeUrl.includes("localhost") ? "local" : "cloud"}
+            </span>
+          )}
+          <button
+            onClick={handleConnect}
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+              isConnected
+                ? "bg-red-50 text-red-600 hover:bg-red-100"
+                : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+            }`}
+          >
+            {isConnected ? "Disconnect" : "Connect"}
+          </button>
           <ZoteroStatus state={zoteroState} onRefresh={zoteroRefresh} />
           {maskedKey && (
             <span className="text-xs font-mono text-gray-400">
@@ -58,9 +160,34 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="flex-1 overflow-hidden p-4">
-        <PaperBrowser onPaperSelect={handlePaperSelect} />
+      {/* Main content — split layout */}
+      <main className="flex flex-1 overflow-hidden">
+        {/* Left: Paper browser */}
+        <div className="flex-1 overflow-hidden border-r border-gray-200 p-4">
+          <PaperBrowser onPaperSelect={handlePaperSelect} />
+        </div>
+
+        {/* Right: Chat + voice panel */}
+        <div className="flex w-96 flex-col bg-white">
+          {/* Chat messages */}
+          <div className="flex-1 overflow-hidden">
+            <ChatPanel
+              messages={messages}
+              onSendText={sendText}
+              isConnected={isConnected}
+            />
+          </div>
+
+          {/* Mic button area */}
+          <div className="flex items-center justify-center border-t border-gray-200 py-4">
+            <MicButton
+              isCapturing={isCapturing}
+              isConnected={isConnected}
+              volume={volume}
+              onToggle={handleMicToggle}
+            />
+          </div>
+        </div>
       </main>
     </div>
   );
