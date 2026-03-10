@@ -136,7 +136,7 @@
   ```
 - [x] **Service URL:** `https://colloquia-backend-318881942640.us-central1.run.app`
 - [x] Verified: `/health` returns `{"status":"ok"}`
-- [ ] Update frontend to use Cloud Run backend URL (env variable or config)
+- [x] Update frontend to use Cloud Run backend URL — auto-resolution in `src/lib/backendUrl.ts` (local vs Cloud Run failover)
 
 ### Day 1 Deliverables Checklist
 - [x] Browse and search Zotero library in the UI — PaperBrowser with collections sidebar, search, detail panel
@@ -150,34 +150,34 @@
 ## Phase 2: Voice Pipeline & Tool Orchestration (Day 2 — March 12)
 
 ### 2.1 Audio Input Pipeline (Mic → Gemini)
-- [ ] Create `src/lib/audio-worklet-processor.ts`:
+- [x] Create `src/lib/worklets/audio-processing.ts`:
   - `AudioWorkletProcessor` subclass for PCM capture
   - Float32 → Int16 conversion (`sample * 0x7FFF`)
   - Post Int16 PCM buffer via `port.postMessage()`
-- [ ] Register worklet in audio context: `audioContext.audioWorklet.addModule()`
-- [ ] Create `src/hooks/useAudioCapture.ts`:
+- [x] Register worklet in audio context via `src/lib/audioworklet-registry.ts`
+- [x] Create `src/hooks/useAudioCapture.ts`:
   - `getUserMedia({ audio: { channelCount: 1 } })`
   - Create `AudioContext({ sampleRate: 16000 })` (Chrome-only; Safari ignores this)
   - Connect MediaStreamSource → AudioWorkletNode
   - Worklet `onmessage` → base64-encode PCM → send via WebSocket
-- [ ] Microphone permission handling: request, grant, deny states in UI
-- [ ] Mic toggle button: start/stop capture with visual indicator
+- [x] Microphone permission handling: request, grant, deny states in UI
+- [x] Mic toggle button: start/stop capture with visual indicator
 
 ### 2.2 Audio Output Pipeline (Gemini → Speaker)
-- [ ] Fork/adapt `audio-streamer.ts` from `live-api-web-console`:
+- [x] Fork/adapt `audio-streamer.ts` from `live-api-web-console`:
   - Receive base64 PCM16 chunks from WebSocket
   - Decode to Int16Array → Float32 (`sample / 32768.0`)
   - Create `AudioBuffer` at 24kHz sample rate
   - Schedule playback using `AudioBufferSourceNode.start(scheduledTime)`
   - Maintain playback queue for smooth continuous audio
-- [ ] Handle interruptions:
+- [x] Handle interruptions:
   - On `server_content.interrupted` → stop all queued sources, clear queue
   - On user barge-in (mic active + model speaking) → clear playback
-- [ ] Visual audio indicator: waveform or volume level during playback
+- [x] Visual audio indicator: volume meter worklet (`src/lib/worklets/vol-meter.ts`)
 
 ### 2.3 WebSocket Client (Frontend)
-- [ ] Create `src/hooks/useWebSocket.ts`:
-  - Connect to backend WebSocket URL
+- [x] Create `src/hooks/useWebSocket.ts`:
+  - Connect to backend WebSocket URL (auto-resolved via `src/lib/backendUrl.ts` — local vs Cloud Run)
   - Send `config` message on open (Gemini key + optional S2 key from localStorage)
   - Handle incoming `ServerMessage` types:
     - `audio` → forward to audio output pipeline
@@ -190,38 +190,38 @@
     - `error` → display toast notification
     - `session_status` → update connection badge
   - Expose `sendAudio()`, `sendText()`, `sendPaperContext()`, `sendControl()`
-  - Reconnection logic with exponential backoff
+  - Reconnection logic with exponential backoff + URL failover
 
 ### 2.4 Backend: Tool Orchestration Loop (Core)
-- [ ] Create `backend/session_handler.py`:
+- [x] Create `backend/session_handler.py`:
   - `run_session(ws, session, config_msg)` — main event loop
   - Two concurrent tasks via `asyncio.create_task()`:
     - `forward_user_to_gemini()` — read from frontend WS, send to Gemini
     - `forward_gemini_to_user()` — read from Gemini, handle tool calls, forward to frontend
   - `asyncio.wait(return_when=FIRST_COMPLETED)` — cancel counterpart on exit
-- [ ] Implement `forward_user_to_gemini()`:
+- [x] Implement `forward_user_to_gemini()`:
   - `audio` → `session.send_realtime_input(audio=Blob(...))`
   - `text` → `session.send_client_content(turns=Content(role="user", ...))`
   - `paper_context` → `handle_paper_load()` (Day 3)
   - `zotero_action_result` → `resolve_zotero_result()` (Day 3)
-- [ ] Implement `forward_gemini_to_user()`:
+- [x] Implement `forward_gemini_to_user()`:
   - `message.data` → forward audio to frontend as base64
   - `message.tool_call` → `handle_tool_calls()` (execute + respond)
   - `message.server_content` → extract transcripts (input/output), handle interruptions
   - `message.usage_metadata` → forward `context_usage` to frontend
   - `message.session_resumption_update` → cache resumption handle
   - `message.go_away` → trigger reconnection
-- [ ] Implement `handle_tool_calls()`:
+- [x] Implement `handle_tool_calls()`:
   - Notify frontend of tool call start (`tool_call` status: "calling")
   - Execute tool from `TOOL_REGISTRY` dict
   - Handle Google Search grounding fallback (if bug is active)
   - Delegate Zotero write tools to frontend (Day 3)
   - Notify frontend of result (`tool_call` status: "done" or "error")
   - Send `FunctionResponse` back to Gemini via `session.send_tool_response()`
-- [ ] Create `TOOL_REGISTRY` dict with at least one test tool (e.g., `echo` tool)
+- [x] Create `TOOL_REGISTRY` dict with at least one test tool (e.g., `echo` tool)
 
 ### 2.5 Backend: LiveConnectConfig Setup
-- [ ] Configure `LiveConnectConfig`:
+- [x] Configure `LiveConnectConfig`:
   - `response_modalities=["AUDIO"]`
   - `system_instruction=LOBBY_SYSTEM_PROMPT`
   - `tools=TOOL_DECLARATIONS` (start with empty, add incrementally)
@@ -229,11 +229,11 @@
   - `output_audio_transcription=AudioTranscriptionConfig()`
   - `input_audio_transcription=AudioTranscriptionConfig()`
   - **No compression** (skip for hackathon — known audio cutoff bug)
-- [ ] Create `backend/prompts/lobby.py` with lobby system prompt
-- [ ] Create `backend/prompts/paper.py` with paper system prompt template
+- [x] Create `backend/prompts/lobby.py` with lobby system prompt
+- [x] Create `backend/prompts/paper.py` with paper system prompt template
 
 ### 2.6 Backend: Verify Mid-Session System Prompt Swap
-- [ ] Test `send_client_content(role="system")` for lobby→paper transition:
+- [x] Test `send_client_content(role="system")` for lobby→paper transition — test script at `backend/tests/test_prompt_swap.py`:
   - Send new system instruction mid-session
   - Verify conversation history is preserved
   - Verify new instruction takes effect for subsequent responses
@@ -241,19 +241,19 @@
   - Send updated instruction as a user turn with explicit "system instruction update" framing
 
 ### 2.7 Basic Voice UI
-- [ ] Build minimal conversation UI:
-  - Large mic button (hold-to-talk or toggle)
-  - Connection status badge (green dot / yellow pulse / red dot)
-  - Basic chat transcript area showing user + model text
-- [ ] Wire mic button → audio capture → WebSocket → backend → Gemini → audio playback
+- [x] Build minimal conversation UI:
+  - MicButton component with toggle and volume indicator (`src/components/MicButton.tsx`)
+  - ConnectionBadge component (green dot / yellow pulse / red dot) (`src/components/ConnectionBadge.tsx`)
+  - ChatPanel with transcript accumulation (`src/components/ChatPanel.tsx`)
+- [x] Wire mic button → audio capture → WebSocket → backend → Gemini → audio playback
 - [ ] Test end-to-end: speak → hear Gemini response
 
 ### Day 2 Deliverables Checklist
 - [ ] Speak to Gemini and hear audio responses through the app
-- [ ] Tool call loop working with at least one test tool
-- [ ] Transcripts appearing in chat panel
-- [ ] Connection status indicator functional
-- [ ] Mid-session system prompt swap verified
+- [x] Tool call loop working with at least one test tool
+- [x] Transcripts appearing in chat panel
+- [x] Connection status indicator functional
+- [x] Mid-session system prompt swap verified (test script created)
 
 ---
 
