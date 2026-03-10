@@ -12,22 +12,22 @@
 ## Phase 0: Pre-Development Setup (Before Day 1)
 
 ### 0.1 Environment & Tooling
-- [ ] Create GitHub repository `colloquia` (Apache 2.0 license)
-- [ ] Set up monorepo structure: `frontend/`, `backend/`, `zotero-colloquia-plugin/`
-- [ ] Obtain Gemini API key from [aistudio.google.com/apikey](https://aistudio.google.com/apikey)
-- [ ] Obtain Semantic Scholar API key (optional, for higher rate limits)
-- [ ] Install Zotero 7 desktop and verify local API at `localhost:23119`
-- [ ] Populate Zotero library with test papers (at least 5-10 papers, preferably HERA/21cm for authentic demo)
-- [ ] Install Google Cloud CLI (`gcloud`) and authenticate
-- [ ] Create Cloud Run project and enable billing
-- [ ] Set up conda environment for Python backend (Python 3.11+)
-- [ ] Verify Chrome browser (target for audio; Safari has AudioContext sample rate issues)
+- [x] Create GitHub repository `colloquia` (Apache 2.0 license) — https://github.com/kartikmandar/colloquia
+- [x] Set up monorepo structure: `frontend/`, `backend/`, `zotero-colloquia-plugin/`
+- [x] Obtain Gemini API key — from GCP project `colloquia-app`, stored in `backend/.env`
+- [ ] Obtain Semantic Scholar API key (optional, for higher rate limits) — skipped for now
+- [x] Install Zotero 7 desktop and verify local API at `localhost:23119`
+- [x] Populate Zotero library with test papers — 100+ papers already present (HERA, 21cm, radio astro)
+- [x] Install Google Cloud CLI (`gcloud`) and authenticate — v556.0.0, enroliaeducation@gmail.com
+- [x] Create Cloud Run project and enable billing — GCP project `colloquia-app`, Cloud Run API enabled
+- [x] Set up conda environment for Python backend — `colloquia` env, Python 3.11.14
+- [x] Verify Chrome browser — Chrome 145 confirmed
 
 ### 0.2 Reference Code Review
-- [ ] Clone and study `google-gemini/live-api-web-console` — focus on `src/lib/audio-streamer.ts` and AudioWorklet processor
-- [ ] Clone and study `windingwind/zotero-plugin-template` — understand build pipeline and structure
-- [ ] Test basic Gemini Live API connection with `google-genai` SDK: `client.aio.live.connect()`
-- [ ] Test Zotero local API: `curl -H "Zotero-Allowed-Request: 1" http://localhost:23119/api/users/0/items/top`
+- [x] Clone and study `google-gemini/live-api-web-console` — audio pipeline: 16kHz capture, 24kHz playback, 200ms schedule-ahead buffer, AudioWorklet threading
+- [x] Clone and study `windingwind/zotero-plugin-template` — factory pattern modules, esbuild→XPI build, HTTP endpoints via `Zotero.Server.Endpoints`
+- [x] Test Gemini Live API connection — **`gemini-2.5-flash-native-audio-latest`** for Live (requires `response_modalities=['AUDIO']`); **`gemini-3-flash-preview`** for text/tools; gemini-2.0-flash deprecated, gemini-3-flash does NOT support bidiGenerateContent
+- [x] Test Zotero local API — confirmed, returns JSON with paper metadata
 
 ---
 
