@@ -17,6 +17,7 @@ from google import genai
 from google.genai import types
 
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
+from prompts.paper import build_paper_prompt
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -48,10 +49,114 @@ TOOL_DECLARATIONS: list[types.FunctionDeclaration] = [
             required=["message"],
         ),
     ),
+    types.FunctionDeclaration(
+        name="search_zotero_library",
+        description=(
+            "Search the user's Zotero library for papers by title, author, "
+            "tag, or collection. Returns matching items with metadata."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "query": types.Schema(
+                    type=types.Type.STRING,
+                    description="Search text matching title, creator, or year",
+                ),
+                "tag": types.Schema(
+                    type=types.Type.STRING,
+                    description="Filter by tag name",
+                ),
+                "collection": types.Schema(
+                    type=types.Type.STRING,
+                    description="Filter by collection key",
+                ),
+                "author": types.Schema(
+                    type=types.Type.STRING,
+                    description="Filter by author name",
+                ),
+            },
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="create_note",
+        description=(
+            "Create a note attached to a paper in Zotero. "
+            "Use this to save discussion insights, analysis, or summaries."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "parentItemKey": types.Schema(
+                    type=types.Type.STRING,
+                    description="Zotero item key of the parent paper",
+                ),
+                "noteContent": types.Schema(
+                    type=types.Type.STRING,
+                    description="HTML content for the note",
+                ),
+                "tags": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.STRING),
+                    description="Tags to add to the note",
+                ),
+            },
+            required=["parentItemKey", "noteContent"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="manage_tags",
+        description=(
+            "Add or remove tags on one or more Zotero items. "
+            "Always confirm with the user before applying."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "action": types.Schema(
+                    type=types.Type.STRING,
+                    description="'add' or 'remove'",
+                ),
+                "itemKeys": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.STRING),
+                    description="Zotero item keys to modify",
+                ),
+                "tags": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.STRING),
+                    description="Tags to add or remove",
+                ),
+            },
+            required=["action", "itemKeys", "tags"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="link_related_items",
+        description=(
+            "Create a bidirectional 'related' link between two papers in Zotero."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "itemKey1": types.Schema(
+                    type=types.Type.STRING,
+                    description="First item key",
+                ),
+                "itemKey2": types.Schema(
+                    type=types.Type.STRING,
+                    description="Second item key",
+                ),
+            },
+            required=["itemKey1", "itemKey2"],
+        ),
+    ),
 ]
 
-# Zotero write tools that need to be delegated to the frontend (Day 3+)
+# Zotero tools that need to be delegated to the frontend
+# (executed via the Colloquia Zotero plugin running on the user's machine)
 ZOTERO_WRITE_TOOLS: set[str] = {
+    "search_zotero_library",
+    "create_note",
     "annotate_zotero_pdf",
     "manage_tags",
     "manage_collection",
@@ -140,11 +245,7 @@ async def run_session(
                     )
 
                 elif msg_type == "paper_context":
-                    # Day 3 — full implementation of handle_paper_load
-                    logger.info(
-                        "Paper context received: %s (stub — full impl Day 3)",
-                        raw.get("paperKey", "unknown"),
-                    )
+                    await handle_paper_load(ws, session, raw)
 
                 elif msg_type == "zotero_action_result":
                     resolve_zotero_result(raw)
@@ -247,6 +348,124 @@ async def run_session(
                 future: asyncio.Future[dict[str, Any]] | None = _pending_zotero.pop(rid, None)
                 if future and not future.done():
                     future.cancel()
+
+
+# ---------------------------------------------------------------------------
+# Paper context loading
+# ---------------------------------------------------------------------------
+
+async def handle_paper_load(
+    ws: WebSocket,
+    session: Any,
+    raw: dict[str, Any],
+) -> None:
+    """Load a paper into the session, swapping to paper mode.
+
+    Receives paper_context message with fulltext, metadata, annotations,
+    and optional page images. Swaps the system prompt and injects the
+    paper content as structured context turns.
+    """
+    paper_key: str = raw.get("paperKey", "unknown")
+    metadata: dict[str, Any] = raw.get("metadata", {})
+    fulltext: str = raw.get("fulltext", "")
+    annotations: list[dict[str, Any]] = raw.get("annotations", [])
+    page_images: list[dict[str, Any]] = raw.get("pageImages", [])
+
+    logger.info(
+        "Loading paper: %s (%s) — %d chars fulltext, %d annotations, %d page images",
+        metadata.get("title", "Unknown"),
+        paper_key,
+        len(fulltext),
+        len(annotations),
+        len(page_images),
+    )
+
+    # Build annotation summary for the prompt
+    annotation_summary: str = ""
+    if annotations:
+        summaries: list[str] = []
+        for ann in annotations[:20]:  # Limit to 20 annotations
+            ann_type: str = ann.get("type", "note")
+            comment: str = ann.get("comment", "")
+            text: str = ann.get("text", "")
+            page: str = ann.get("pageLabel", "?")
+            if comment or text:
+                content: str = comment or text
+                summaries.append(f"  - [{ann_type}] p.{page}: {content[:150]}")
+        if summaries:
+            annotation_summary = "User's existing annotations:\n" + "\n".join(summaries)
+
+    # Find PDF attachment key from metadata or annotations
+    pdf_attachment_key: str = metadata.get("pdfAttachmentKey", paper_key)
+
+    # Build paper system prompt
+    paper_prompt: str = build_paper_prompt(
+        title=metadata.get("title", ""),
+        authors=", ".join(metadata.get("authors", [])),
+        year=str(metadata.get("year", "")),
+        doi=metadata.get("doi", ""),
+        venue=metadata.get("journal", ""),
+        annotation_count=len(annotations),
+        note_count=0,
+        pdf_attachment_key=pdf_attachment_key,
+        user_annotations_summary=annotation_summary,
+    )
+
+    # Swap system prompt via send_client_content with role="system"
+    await session.send_client_content(
+        turns=types.Content(
+            role="user",
+            parts=[types.Part(text=f"[SYSTEM INSTRUCTION UPDATE]\n\n{paper_prompt}")],
+        ),
+        turn_complete=True,
+    )
+
+    # Inject paper fulltext as a user turn
+    context_parts: list[types.Part] = []
+
+    if fulltext:
+        # Truncate very long fulltext to stay within token limits
+        max_chars: int = 100_000  # ~25K tokens
+        truncated: str = fulltext[:max_chars]
+        if len(fulltext) > max_chars:
+            truncated += "\n\n[... text truncated for context window ...]"
+        context_parts.append(
+            types.Part(text=f"[PAPER FULL TEXT]\n\n{truncated}")
+        )
+
+    # Inject page images as inline data
+    for page_img in page_images:
+        image_b64: str = page_img.get("data", page_img.get("imageBase64", ""))
+        page_idx: int = page_img.get("pageIndex", 0)
+        if image_b64:
+            context_parts.append(
+                types.Part(text=f"[PAGE {page_idx + 1} IMAGE]")
+            )
+            context_parts.append(
+                types.Part(
+                    inline_data=types.Blob(
+                        data=base64.b64decode(image_b64),
+                        mime_type="image/jpeg",
+                    )
+                )
+            )
+
+    if context_parts:
+        await session.send_client_content(
+            turns=types.Content(
+                role="user",
+                parts=context_parts,
+            ),
+            turn_complete=True,
+        )
+
+    # Notify frontend that paper is loaded
+    await ws.send_json({
+        "type": "session_status",
+        "status": "connected",
+    })
+
+    logger.info("Paper loaded successfully: %s", metadata.get("title", paper_key))
 
 
 # ---------------------------------------------------------------------------

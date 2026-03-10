@@ -15,6 +15,7 @@ import type {
   ToolCallMessage,
   ContextUsageMessage,
   SessionStatusMessage,
+  ZoteroActionMessage,
 } from "../lib/protocol";
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
@@ -90,6 +91,58 @@ export function useWebSocket({
     []
   );
 
+  const sendZoteroActionResult = useCallback(
+    (requestId: string, success: boolean, resultData?: unknown, error?: string): void => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        const msg: Record<string, unknown> = {
+          type: "zotero_action_result",
+          requestId,
+          success,
+        };
+        if (success) {
+          msg.data = resultData ?? {};
+        } else {
+          msg.error = error ?? "Unknown error";
+        }
+        wsRef.current.send(JSON.stringify(msg));
+      }
+    },
+    []
+  );
+
+  const handleZoteroAction = useCallback(
+    async (action: ZoteroActionMessage): Promise<void> => {
+      const { requestId, action: actionName, params } = action;
+      const pluginUrl = `/zotero-plugin/colloquia/${actionName}`;
+
+      try {
+        const response: Response = await fetch(pluginUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+
+        if (!response.ok) {
+          const errorText: string = await response.text();
+          sendZoteroActionResult(requestId, false, undefined, `Plugin error (${response.status}): ${errorText}`);
+          return;
+        }
+
+        const resultData: unknown = await response.json();
+        sendZoteroActionResult(requestId, true, resultData);
+      } catch (e: unknown) {
+        const errorMsg: string =
+          e instanceof TypeError && (e as TypeError).message.includes("fetch")
+            ? "Zotero is not running or the Colloquia plugin is not installed"
+            : e instanceof Error
+              ? e.message
+              : "Unknown error calling Zotero plugin";
+        sendZoteroActionResult(requestId, false, undefined, errorMsg);
+      }
+    },
+    [sendZoteroActionResult]
+  );
+
   const handleMessage = useCallback(
     (event: MessageEvent): void => {
       let data: ServerMessage;
@@ -155,9 +208,11 @@ export function useWebSocket({
         case "thinking":
           break;
 
-        case "zotero_action":
-          // Day 3 — handle Zotero write delegation
+        case "zotero_action": {
+          const za: ZoteroActionMessage = data;
+          handleZoteroAction(za);
           break;
+        }
 
         case "context_usage":
           setContextUsage(data);
@@ -180,7 +235,7 @@ export function useWebSocket({
         }
       }
     },
-    [onAudioData, addMessage]
+    [onAudioData, addMessage, handleZoteroAction]
   );
 
   const connectToUrl = useCallback(

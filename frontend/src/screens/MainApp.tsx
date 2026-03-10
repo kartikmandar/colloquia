@@ -5,6 +5,8 @@ import { useWebSocket } from "../hooks/useWebSocket";
 import { useAudioCapture } from "../hooks/useAudioCapture";
 import { AudioStreamer } from "../lib/audio-streamer";
 import { resolveBackendUrl } from "../lib/backendUrl";
+import { loadPaper } from "../lib/paperLoader";
+import type { LoadPaperResult } from "../lib/paperLoader";
 import ZoteroStatus from "../components/ZoteroStatus";
 import PaperBrowser from "../components/PaperBrowser";
 import ConnectionBadge from "../components/ConnectionBadge";
@@ -31,7 +33,8 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
   const { state: zoteroState, refresh: zoteroRefresh } = useZoteroHealth();
 
   const [selectedPaperKey, setSelectedPaperKey] = useState<string | null>(null);
-  void selectedPaperKey;
+  const [loadedPaperTitle, setLoadedPaperTitle] = useState<string | null>(null);
+  const [paperLoading, setPaperLoading] = useState<boolean>(false);
 
   // Audio playback context (24kHz for Gemini output)
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
@@ -66,6 +69,7 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     disconnect,
     sendAudio,
     sendText,
+    sendPaperContext,
   } = useWebSocket({
     url: wsUrl,
     onAudioData: handleAudioFromServer,
@@ -83,9 +87,25 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     onAudioData: sendAudio,
   });
 
-  const handlePaperSelect = useCallback((paperKey: string): void => {
-    setSelectedPaperKey(paperKey);
-  }, []);
+  const handlePaperSelect = useCallback(
+    async (paperKey: string): Promise<void> => {
+      setSelectedPaperKey(paperKey);
+
+      if (!isConnected) return;
+
+      setPaperLoading(true);
+      try {
+        const result: LoadPaperResult = await loadPaper(paperKey);
+        sendPaperContext(result.message as unknown as Record<string, unknown>);
+        setLoadedPaperTitle(result.title);
+      } catch (err: unknown) {
+        console.error("Failed to load paper:", err);
+      } finally {
+        setPaperLoading(false);
+      }
+    },
+    [isConnected, sendPaperContext],
+  );
 
   const handleMicToggle = useCallback(async (): Promise<void> => {
     if (isCapturing) {
@@ -169,6 +189,23 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
 
         {/* Right: Chat + voice panel */}
         <div className="flex w-96 flex-col bg-white">
+          {/* Paper loading indicator */}
+          {paperLoading && (
+            <div className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700">
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Loading paper context...
+            </div>
+          )}
+          {loadedPaperTitle && !paperLoading && (
+            <div className="flex items-center gap-2 border-b border-purple-100 bg-purple-50 px-4 py-2 text-xs text-purple-700">
+              <span className="font-medium truncate" title={loadedPaperTitle}>
+                Discussing: {loadedPaperTitle}
+              </span>
+            </div>
+          )}
           {/* Chat messages */}
           <div className="flex-1 overflow-hidden">
             <ChatPanel
