@@ -8,7 +8,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/zotero-api": {
-        target: "http://localhost:23119",
+        target: "http://localhost:23124",
         changeOrigin: true,
         rewrite: (path: string): string =>
           path.replace(/^\/zotero-api/, "/api"),
@@ -18,7 +18,7 @@ export default defineConfig({
         },
       },
       "/zotero-plugin": {
-        target: "http://localhost:23119",
+        target: "http://localhost:23124",
         changeOrigin: true,
         rewrite: (path: string): string => path.replace(/^\/zotero-plugin/, ""),
         headers: {

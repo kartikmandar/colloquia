@@ -39,6 +39,15 @@ export default defineConfig({
     ],
   },
 
+  server: {
+    devtools: true,
+    prefs: {
+      // Ensure the HTTP server starts even with --no-remote
+      "extensions.zotero.httpServer.localAPI.enabled": true,
+      "extensions.zotero.httpServer.port": 23124,
+    },
+  },
+
   test: {
     waitForPlugin: `() => Zotero.${pkg.config.addonInstance}.data.initialized`,
   },
