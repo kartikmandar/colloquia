@@ -19,3 +19,4 @@ MAX_RECONNECTS: int = 5
 ZOTERO_TIMEOUT: float = 10.0
 TEXT_TOKEN_BUDGET: int = 30000
 MAX_FULLTEXT_CHARS: int = 100_000
+MAX_HISTORY_TURNS: int = 20  # ~10 user-model exchanges

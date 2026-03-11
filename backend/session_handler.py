@@ -16,7 +16,7 @@ from google.adk.runners import RunConfig
 from google.genai import types
 
 from agent_factory import SessionBundle, create_session_bundle
-from config import MAX_RECONNECTS, TEXT_MODEL, TEXT_MODEL_FALLBACK
+from config import MAX_HISTORY_TURNS, MAX_RECONNECTS, TEXT_MODEL, TEXT_MODEL_FALLBACK
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
 from tools.local_tools import search_academic_papers, get_paper_recommendations
@@ -375,6 +375,9 @@ async def handle_paper_load(
     session.state["session_mode"] = "paper"
     session.state["paper_context"] = paper_context
 
+    # Clear text chat history on mode switch
+    bundle.text_chat_history.clear()
+
     # Inject paper content as user message via LiveRequestQueue
     context_parts: list[types.Part] = []
 
@@ -444,6 +447,9 @@ async def handle_switch_to_lobby(
     bundle.session.state["session_mode"] = "lobby"
     bundle.session.state["paper_context"] = {}
 
+    # Clear text chat history on mode switch
+    bundle.text_chat_history.clear()
+
     live_queue.send_content(
         types.Content(
             role="user",
@@ -473,234 +479,248 @@ async def handle_text_message(
 
     await ws.send_json({"type": "text_response_start"})
 
-    try:
-        client: genai.Client = genai.Client(
-            api_key=api_key,
-            http_options={"timeout": 30000},
-        )
-
-        # Build system instruction from session state
-        session_mode: str = bundle.session.state.get("session_mode", "lobby")
-        if session_mode == "paper":
-            paper_ctx: dict[str, Any] = bundle.session.state.get("paper_context", {})
-            system_instruction: str = (
-                f"You are Colloquia, an AI research assistant. "
-                f"You are currently discussing the paper: {paper_ctx.get('title', 'Unknown')} "
-                f"by {paper_ctx.get('authors', 'Unknown')} ({paper_ctx.get('year', '')}).\n"
-                f"Provide helpful, precise responses in markdown format. "
-                f"When deep analysis is needed, say so explicitly.\n\n"
-                f"## Tools Available\n"
-                f"- search_zotero_library — search the user's Zotero library\n"
-                f"- search_academic_papers — search Semantic Scholar\n"
-                f"- add_paper_to_zotero — add a paper (confirm first)\n"
-                f"- get_paper_recommendations — find similar papers\n"
-                f"- manage_tags, manage_collection — organize the library\n"
-                f"- create_note — save notes to Zotero items\n"
-                f"Use tools proactively when the user asks about their library or papers.\n\n"
-                f"## CRITICAL Tool Usage Rules\n"
-                f"Call each tool ONCE per turn. Never call the same tool multiple times "
-                f"with different or similar parameters in a single response. One call with "
-                f"broad parameters is enough."
+    async with bundle.text_chat_lock:
+        try:
+            client: genai.Client = genai.Client(
+                api_key=api_key,
+                http_options={"timeout": 30000},
             )
-        else:
-            system_instruction = LOBBY_SYSTEM_PROMPT
 
-        # --- Build tool functions and lookup map ---
-        zotero_tool_funcs: list[Any] = create_zotero_tools(ws, bundle.zotero_ctx)
-        local_tool_funcs: list[Any] = [search_academic_papers, get_paper_recommendations]
-        all_tool_funcs: list[Any] = zotero_tool_funcs + local_tool_funcs
-        tool_map: dict[str, Any] = {func.__name__: func for func in all_tool_funcs}
+            # Build system instruction from session state
+            session_mode: str = bundle.session.state.get("session_mode", "lobby")
+            if session_mode == "paper":
+                paper_ctx: dict[str, Any] = bundle.session.state.get("paper_context", {})
+                system_instruction: str = (
+                    f"You are Colloquia, an AI research assistant. "
+                    f"You are currently discussing the paper: {paper_ctx.get('title', 'Unknown')} "
+                    f"by {paper_ctx.get('authors', 'Unknown')} ({paper_ctx.get('year', '')}).\n"
+                    f"Provide helpful, precise responses in markdown format. "
+                    f"When deep analysis is needed, say so explicitly.\n\n"
+                    f"## Tools Available\n"
+                    f"- search_zotero_library — search the user's Zotero library\n"
+                    f"- search_academic_papers — search Semantic Scholar\n"
+                    f"- add_paper_to_zotero — add a paper (confirm first)\n"
+                    f"- get_paper_recommendations — find similar papers\n"
+                    f"- manage_tags, manage_collection — organize the library\n"
+                    f"- create_note — save notes to Zotero items\n"
+                    f"Use tools proactively when the user asks about their library or papers.\n\n"
+                    f"## CRITICAL Tool Usage Rules\n"
+                    f"Call each tool ONCE per turn. Never call the same tool multiple times "
+                    f"with different or similar parameters in a single response. One call with "
+                    f"broad parameters is enough."
+                )
+            else:
+                system_instruction = LOBBY_SYSTEM_PROMPT
 
-        # Conversation history for multi-turn function calling
-        context_contents: list[Any] = [
-            genai.types.Content(
+            # --- Build tool functions and lookup map ---
+            zotero_tool_funcs: list[Any] = create_zotero_tools(ws, bundle.zotero_ctx)
+            local_tool_funcs: list[Any] = [search_academic_papers, get_paper_recommendations]
+            all_tool_funcs: list[Any] = zotero_tool_funcs + local_tool_funcs
+            tool_map: dict[str, Any] = {func.__name__: func for func in all_tool_funcs}
+
+            # Build new user message
+            new_user_msg: genai.types.Content = genai.types.Content(
                 role="user",
                 parts=[genai.types.Part.from_text(text=content)],
-            ),
-        ]
+            )
 
-        full_text: str = ""
-        used_model: str = TEXT_MODEL
-        max_tool_turns: int = 5
-        # Track executed tool calls across all turns to prevent re-execution
-        executed_tool_keys: set[str] = set()
+            # Seed from persistent history + new message
+            context_contents: list[Any] = list(bundle.text_chat_history) + [new_user_msg]
 
-        for model_name in (TEXT_MODEL, TEXT_MODEL_FALLBACK):
-            try:
-                logger.info("Trying text model: %s", model_name)
-                used_model = model_name
+            # Cap history to avoid exceeding context window
+            if len(context_contents) > MAX_HISTORY_TURNS:
+                context_contents = context_contents[-MAX_HISTORY_TURNS:]
 
-                for _turn in range(max_tool_turns):
-                    response_parts: list[Any] = []
-                    function_calls: list[Any] = []
-                    turn_text: str = ""
+            full_text: str = ""
+            used_model: str = TEXT_MODEL
+            max_tool_turns: int = 5
+            # Track executed tool calls across all turns to prevent re-execution
+            executed_tool_keys: set[str] = set()
 
-                    stream = await client.aio.models.generate_content_stream(
-                        model=model_name,
-                        contents=context_contents,
-                        config=genai.types.GenerateContentConfig(
-                            system_instruction=system_instruction,
-                            temperature=0.7,
-                            max_output_tokens=2048,
-                            tools=all_tool_funcs,
-                            automatic_function_calling=genai.types.AutomaticFunctionCallingConfig(
-                                disable=True,
+            for model_name in (TEXT_MODEL, TEXT_MODEL_FALLBACK):
+                try:
+                    logger.info("Trying text model: %s", model_name)
+                    used_model = model_name
+
+                    for _turn in range(max_tool_turns):
+                        response_parts: list[Any] = []
+                        function_calls: list[Any] = []
+                        turn_text: str = ""
+
+                        stream = await client.aio.models.generate_content_stream(
+                            model=model_name,
+                            contents=context_contents,
+                            config=genai.types.GenerateContentConfig(
+                                system_instruction=system_instruction,
+                                temperature=0.7,
+                                max_output_tokens=2048,
+                                tools=all_tool_funcs,
+                                automatic_function_calling=genai.types.AutomaticFunctionCallingConfig(
+                                    disable=True,
+                                ),
                             ),
-                        ),
-                    )
+                        )
 
-                    async for chunk in stream:
-                        if not chunk.candidates:
-                            continue
-                        for part in chunk.candidates[0].content.parts:
-                            response_parts.append(part)
-                            if part.function_call:
-                                function_calls.append(part.function_call)
-                            elif part.text:
-                                turn_text += part.text
-                                full_text += part.text
-                                await ws.send_json({
-                                    "type": "text_response_chunk",
-                                    "content": part.text,
-                                    "model": model_name,
-                                })
+                        async for chunk in stream:
+                            if not chunk.candidates:
+                                continue
+                            for part in chunk.candidates[0].content.parts:
+                                response_parts.append(part)
+                                if part.function_call:
+                                    function_calls.append(part.function_call)
+                                elif part.text:
+                                    turn_text += part.text
+                                    full_text += part.text
+                                    await ws.send_json({
+                                        "type": "text_response_chunk",
+                                        "content": part.text,
+                                        "model": model_name,
+                                    })
 
-                    # If no function calls, we're done
-                    if not function_calls:
-                        break
+                        # If no function calls, we're done
+                        if not function_calls:
+                            # Append final text response to history
+                            if response_parts:
+                                context_contents.append(
+                                    genai.types.Content(role="model", parts=response_parts)
+                                )
+                            break
 
-                    # Append model response (with function call parts) to history
-                    context_contents.append(
-                        genai.types.Content(role="model", parts=response_parts)
-                    )
+                        # Append model response (with function call parts) to history
+                        context_contents.append(
+                            genai.types.Content(role="model", parts=response_parts)
+                        )
 
-                    # Deduplicate: mark which calls to actually execute vs skip.
-                    # Use json.dumps for reliable protobuf MapComposite serialization.
-                    # Strip empty/falsy values so {action:"list"} matches
-                    # {action:"list", name:""}.
-                    import json as _json
+                        # Deduplicate: mark which calls to actually execute vs skip.
+                        # Use json.dumps for reliable protobuf MapComposite serialization.
+                        # Strip empty/falsy values so {action:"list"} matches
+                        # {action:"list", name:""}.
+                        import json as _json
 
-                    def _dedup_key(fc: Any) -> str:
-                        try:
-                            raw: dict[str, Any] = {
-                                str(k): v for k, v in (fc.args.items() if fc.args else [])
-                            }
-                        except Exception:
-                            raw = {}
-                        normalized: dict[str, Any] = {k: v for k, v in raw.items() if v}
-                        return f"{fc.name}:{_json.dumps(normalized, sort_keys=True)}"
+                        def _dedup_key(fc: Any) -> str:
+                            try:
+                                raw: dict[str, Any] = {
+                                    str(k): v for k, v in (fc.args.items() if fc.args else [])
+                                }
+                            except Exception:
+                                raw = {}
+                            normalized: dict[str, Any] = {k: v for k, v in raw.items() if v}
+                            return f"{fc.name}:{_json.dumps(normalized, sort_keys=True)}"
 
-                    # Execute each function call and collect results.
-                    # Skipped duplicates still get a response part so Gemini's
-                    # context stays consistent (one response per function_call).
-                    function_response_parts: list[Any] = []
-                    tool_result_cache: dict[str, dict[str, Any]] = {}
-                    for fc in function_calls:
-                        fn_name: str = fc.name
-                        fn_args: dict[str, Any] = dict(fc.args) if fc.args else {}
-                        key: str = _dedup_key(fc)
+                        # Execute each function call and collect results.
+                        # Skipped duplicates still get a response part so Gemini's
+                        # context stays consistent (one response per function_call).
+                        function_response_parts: list[Any] = []
+                        tool_result_cache: dict[str, dict[str, Any]] = {}
+                        for fc in function_calls:
+                            fn_name: str = fc.name
+                            fn_args: dict[str, Any] = dict(fc.args) if fc.args else {}
+                            key: str = _dedup_key(fc)
 
-                        # If we already executed this exact call, reuse the
-                        # cached result — no re-execution, no frontend badge.
-                        if key in executed_tool_keys:
-                            cached: dict[str, Any] = tool_result_cache.get(
-                                key, {"result": "duplicate call skipped"}
-                            )
-                            logger.info("Skipping duplicate tool call: %s(%s)", fn_name, fn_args)
+                            # If we already executed this exact call, reuse the
+                            # cached result — no re-execution, no frontend badge.
+                            if key in executed_tool_keys:
+                                cached: dict[str, Any] = tool_result_cache.get(
+                                    key, {"result": "duplicate call skipped"}
+                                )
+                                logger.info("Skipping duplicate tool call: %s(%s)", fn_name, fn_args)
+                                function_response_parts.append(
+                                    genai.types.Part.from_function_response(
+                                        name=fn_name,
+                                        response=cached if isinstance(cached, dict) else {"result": cached},
+                                    )
+                                )
+                                continue
+
+                            executed_tool_keys.add(key)
+                            logger.info("Text mode tool call: %s(%s)", fn_name, fn_args)
+
+                            # Notify frontend about the tool call
+                            await ws.send_json({
+                                "type": "tool_call",
+                                "toolName": fn_name,
+                                "status": "calling",
+                                "input": fn_args,
+                            })
+
+                            tool_failed: bool = False
+                            try:
+                                fn_callable = tool_map.get(fn_name)
+                                if fn_callable is None:
+                                    result: dict[str, Any] = {"error": f"Unknown tool: {fn_name}"}
+                                    tool_failed = True
+                                else:
+                                    result = await fn_callable(**fn_args)
+                            except Exception as tool_err:
+                                logger.warning("Tool %s failed: %s", fn_name, str(tool_err))
+                                result = {"error": str(tool_err)}
+                                tool_failed = True
+
+                            # Cache the result for potential duplicate calls
+                            tool_result_cache[key] = result if isinstance(result, dict) else {"result": result}
+
+                            # Notify frontend about tool completion or error
+                            try:
+                                if tool_failed or "error" in result:
+                                    await ws.send_json({
+                                        "type": "tool_call",
+                                        "toolName": fn_name,
+                                        "status": "error",
+                                        "error": result.get("error", "Unknown error"),
+                                    })
+                                else:
+                                    await ws.send_json({
+                                        "type": "tool_call",
+                                        "toolName": fn_name,
+                                        "status": "done",
+                                        "output": result,
+                                    })
+                            except Exception:
+                                pass  # WebSocket may already be closed
+
                             function_response_parts.append(
                                 genai.types.Part.from_function_response(
                                     name=fn_name,
-                                    response=cached if isinstance(cached, dict) else {"result": cached},
+                                    response=result if isinstance(result, dict) else {"result": result},
                                 )
                             )
-                            continue
 
-                        executed_tool_keys.add(key)
-                        logger.info("Text mode tool call: %s(%s)", fn_name, fn_args)
-
-                        # Notify frontend about the tool call
-                        await ws.send_json({
-                            "type": "tool_call",
-                            "toolName": fn_name,
-                            "status": "calling",
-                            "input": fn_args,
-                        })
-
-                        tool_failed: bool = False
-                        try:
-                            fn_callable = tool_map.get(fn_name)
-                            if fn_callable is None:
-                                result: dict[str, Any] = {"error": f"Unknown tool: {fn_name}"}
-                                tool_failed = True
-                            else:
-                                result = await fn_callable(**fn_args)
-                        except Exception as tool_err:
-                            logger.warning("Tool %s failed: %s", fn_name, str(tool_err))
-                            result = {"error": str(tool_err)}
-                            tool_failed = True
-
-                        # Cache the result for potential duplicate calls
-                        tool_result_cache[key] = result if isinstance(result, dict) else {"result": result}
-
-                        # Notify frontend about tool completion or error
-                        try:
-                            if tool_failed or "error" in result:
-                                await ws.send_json({
-                                    "type": "tool_call",
-                                    "toolName": fn_name,
-                                    "status": "error",
-                                    "error": result.get("error", "Unknown error"),
-                                })
-                            else:
-                                await ws.send_json({
-                                    "type": "tool_call",
-                                    "toolName": fn_name,
-                                    "status": "done",
-                                    "output": result,
-                                })
-                        except Exception:
-                            pass  # WebSocket may already be closed
-
-                        function_response_parts.append(
-                            genai.types.Part.from_function_response(
-                                name=fn_name,
-                                response=result if isinstance(result, dict) else {"result": result},
-                            )
+                        # Append function results as a user turn
+                        context_contents.append(
+                            genai.types.Content(role="user", parts=function_response_parts)
                         )
 
-                    # Append function results as a user turn
-                    context_contents.append(
-                        genai.types.Content(role="user", parts=function_response_parts)
+                    break  # Model succeeded, don't try fallback
+                except Exception as model_err:
+                    logger.warning(
+                        "Text model %s failed: %s: %s",
+                        model_name, type(model_err).__name__, str(model_err),
                     )
+                    if model_name == TEXT_MODEL_FALLBACK:
+                        raise
 
-                break  # Model succeeded, don't try fallback
-            except Exception as model_err:
-                logger.warning(
-                    "Text model %s failed: %s: %s",
-                    model_name, type(model_err).__name__, str(model_err),
-                )
-                if model_name == TEXT_MODEL_FALLBACK:
-                    raise
+            if not full_text:
+                full_text = "I couldn't generate a response."
+                await ws.send_json({
+                    "type": "text_response_chunk",
+                    "content": full_text,
+                    "model": used_model,
+                })
 
-        if not full_text:
-            full_text = "I couldn't generate a response."
+            # Persist conversation history for next call
+            bundle.text_chat_history = context_contents
+
             await ws.send_json({
-                "type": "text_response_chunk",
-                "content": full_text,
+                "type": "text_response_done",
                 "model": used_model,
             })
 
-        await ws.send_json({
-            "type": "text_response_done",
-            "model": used_model,
-        })
-
-    except Exception as e:
-        logger.error("Text message handling failed: %s", str(e))
-        try:
-            await ws.send_json({
-                "type": "error",
-                "message": f"Text response failed: {str(e)}",
-            })
-        except Exception:
-            logger.warning("Could not send error to frontend — WebSocket already closed")
+        except Exception as e:
+            logger.error("Text message handling failed: %s", str(e))
+            try:
+                await ws.send_json({
+                    "type": "error",
+                    "message": f"Text response failed: {str(e)}",
+                })
+            except Exception:
+                logger.warning("Could not send error to frontend — WebSocket already closed")

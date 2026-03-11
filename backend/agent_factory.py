@@ -9,7 +9,7 @@ import asyncio
 import logging
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from fastapi import WebSocket
@@ -34,6 +34,8 @@ class SessionBundle:
     session: Session
     session_service: InMemorySessionService
     zotero_ctx: ZoteroToolContext
+    text_chat_history: list[Any] = field(default_factory=list)
+    text_chat_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 async def create_session_bundle(
