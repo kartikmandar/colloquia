@@ -82,6 +82,8 @@ interface CollectionSidebarProps {
   onSelect: (key: string | null) => void;
   loading: boolean;
   error: string | null;
+  onRefresh: () => void;
+  refreshing: boolean;
 }
 
 function CollectionSidebar({
@@ -90,11 +92,37 @@ function CollectionSidebar({
   onSelect,
   loading,
   error,
+  onRefresh,
+  refreshing,
 }: CollectionSidebarProps): React.ReactElement {
   return (
     <aside className="flex h-full flex-col border-r border-border-primary bg-surface-secondary">
-      <h2 className="border-b border-border-primary px-4 py-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">
-        Collections
+      <h2 className="flex items-center justify-between border-b border-border-primary px-4 py-3">
+        <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+          Collections
+        </span>
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          className="rounded p-1 text-text-tertiary transition-colors hover:bg-surface-tertiary hover:text-text-secondary disabled:opacity-50"
+          aria-label="Refresh collections"
+          title="Refresh collections"
+        >
+          <svg
+            className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M4 4v5h5M20 20v-5h-5M20.49 9A9 9 0 0 0 5.64 5.64L4 4m15.36 15.36A9 9 0 0 1 3.51 15"
+            />
+          </svg>
+        </button>
       </h2>
 
       {loading && <LoadingSpinner />}
@@ -361,37 +389,27 @@ function PaperBrowser({
   const [selectedPaper, setSelectedPaper] = useState<ZoteroItem | null>(null);
 
   // ----------------------------------------------------------
-  // Fetch collections on mount
+  // Refresh collections (reusable callback)
   // ----------------------------------------------------------
-  useEffect(() => {
-    let cancelled: boolean = false;
-
-    const load = async (): Promise<void> => {
-      setCollectionsLoading(true);
-      setCollectionsError(null);
-      try {
-        const result: ZoteroCollection[] = await fetchCollections();
-        if (!cancelled) {
-          setCollections(result);
-        }
-      } catch (err: unknown) {
-        if (!cancelled) {
-          const message: string =
-            err instanceof Error ? err.message : "Failed to load collections";
-          setCollectionsError(message);
-        }
-      } finally {
-        if (!cancelled) {
-          setCollectionsLoading(false);
-        }
-      }
-    };
-
-    void load();
-    return (): void => {
-      cancelled = true;
-    };
+  const refreshCollections = useCallback(async (): Promise<void> => {
+    setCollectionsLoading(true);
+    setCollectionsError(null);
+    try {
+      const result: ZoteroCollection[] = await fetchCollections();
+      setCollections(result);
+    } catch (err: unknown) {
+      const message: string =
+        err instanceof Error ? err.message : "Failed to load collections";
+      setCollectionsError(message);
+    } finally {
+      setCollectionsLoading(false);
+    }
   }, []);
+
+  // Fetch collections on mount
+  useEffect(() => {
+    void refreshCollections();
+  }, [refreshCollections]);
 
   // ----------------------------------------------------------
   // Fetch papers when collection changes (and no search)
@@ -423,6 +441,26 @@ function PaperBrowser({
       void loadPapers(activeCollection);
     }
   }, [activeCollection, searchQuery, loadPapers]);
+
+  // ----------------------------------------------------------
+  // Refresh all (collections + current papers)
+  // ----------------------------------------------------------
+  const refreshAll = useCallback(async (): Promise<void> => {
+    await refreshCollections();
+    if (!isSearching) {
+      await loadPapers(activeCollection);
+    }
+  }, [refreshCollections, isSearching, activeCollection, loadPapers]);
+
+  // ----------------------------------------------------------
+  // Auto-refresh every 2 minutes
+  // ----------------------------------------------------------
+  useEffect(() => {
+    const interval: ReturnType<typeof setInterval> = setInterval(() => {
+      void refreshAll();
+    }, 120_000);
+    return (): void => clearInterval(interval);
+  }, [refreshAll]);
 
   // ----------------------------------------------------------
   // Debounced search
@@ -514,6 +552,8 @@ function PaperBrowser({
             onSelect={handleCollectionSelect}
             loading={collectionsLoading}
             error={collectionsError}
+            onRefresh={refreshAll}
+            refreshing={collectionsLoading}
           />
         </Panel>
         <ResizeHandle />
