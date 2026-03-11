@@ -25,10 +25,10 @@ function MicButton({
       aria-label={isCapturing ? "Stop microphone" : "Start microphone"}
       className={`relative flex h-16 w-16 items-center justify-center rounded-full transition-all duration-150 ${
         isCapturing
-          ? "bg-red-500 text-white shadow-lg shadow-red-200 hover:bg-red-600"
+          ? "bg-red-500 text-white shadow-lg shadow-red-200 hover:bg-red-600 dark:shadow-red-900/30"
           : isConnected
-            ? "bg-blue-600 text-white shadow-lg shadow-blue-200 hover:bg-blue-700"
-            : "bg-gray-300 text-gray-500 cursor-not-allowed"
+            ? "bg-accent-primary text-white shadow-lg shadow-blue-200 hover:bg-accent-primary-hover dark:shadow-blue-900/30"
+            : "bg-surface-tertiary text-text-tertiary cursor-not-allowed"
       }`}
     >
       {/* Volume ring */}
@@ -39,11 +39,7 @@ function MicButton({
         />
       )}
       {/* Mic icon */}
-      <svg
-        className="relative h-7 w-7"
-        viewBox="0 0 20 20"
-        fill="currentColor"
-      >
+      <svg className="relative h-7 w-7" viewBox="0 0 20 20" fill="currentColor">
         {isCapturing ? (
           // Stop icon (square)
           <rect x="6" y="6" width="8" height="8" rx="1" />

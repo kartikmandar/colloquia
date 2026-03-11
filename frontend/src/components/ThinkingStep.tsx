@@ -27,11 +27,15 @@ function ThinkingStep({
       <button
         type="button"
         onClick={(): void => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 rounded bg-purple-50 px-2 py-1 text-[11px] text-purple-600 transition-colors hover:bg-purple-100"
+        className="flex items-center gap-1.5 rounded-lg bg-purple-50 px-2 py-1 text-xs text-purple-600 transition-colors hover:bg-purple-100 dark:bg-purple-950 dark:text-purple-400 dark:hover:bg-purple-900"
       >
         <span>{"\uD83D\uDCAD"}</span>
         <span className="font-medium">Thinking...</span>
-        {duration && <span className="text-purple-400">{duration}</span>}
+        {duration && (
+          <span className="text-purple-400 dark:text-purple-500">
+            {duration}
+          </span>
+        )}
         <svg
           className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`}
           viewBox="0 0 20 20"
@@ -46,8 +50,8 @@ function ThinkingStep({
       </button>
 
       {expanded && (
-        <div className="mt-1 rounded border border-purple-200 bg-purple-50 p-2">
-          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[10px] text-purple-800">
+        <div className="mt-1 rounded-lg border border-purple-200 bg-purple-50 p-2 dark:border-purple-800 dark:bg-purple-950">
+          <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-purple-800 dark:text-purple-300">
             {content}
           </pre>
         </div>

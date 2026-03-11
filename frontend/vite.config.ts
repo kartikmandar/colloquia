@@ -10,7 +10,8 @@ export default defineConfig({
       "/zotero-api": {
         target: "http://localhost:23119",
         changeOrigin: true,
-        rewrite: (path: string): string => path.replace(/^\/zotero-api/, "/api"),
+        rewrite: (path: string): string =>
+          path.replace(/^\/zotero-api/, "/api"),
         headers: {
           "Zotero-Allowed-Request": "1",
           "User-Agent": "Colloquia/1.0",

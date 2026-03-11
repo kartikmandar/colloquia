@@ -21,7 +21,11 @@ import type {
   ZoteroActionMessage,
 } from "../lib/protocol";
 
-export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "reconnecting";
+export type ConnectionStatus =
+  | "disconnected"
+  | "connecting"
+  | "connected"
+  | "reconnecting";
 
 export interface ChatMessage {
   id: string;
@@ -68,8 +72,9 @@ export function useWebSocket({
 }: UseWebSocketOptions): UseWebSocketReturn {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [contextUsage, setContextUsage] =
-    useState<ContextUsageMessage | null>(null);
+  const [contextUsage, setContextUsage] = useState<ContextUsageMessage | null>(
+    null,
+  );
   const [activeUrl, setActiveUrl] = useState<string>(url);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -78,6 +83,7 @@ export function useWebSocket({
   const intentionalCloseRef = useRef<boolean>(false);
   const currentUrlRef = useRef<string>(url);
   const triedFallbackRef = useRef<boolean>(false);
+  const scheduleReconnectRef = useRef<() => void>(() => {});
 
   // Keep ref in sync with prop
   useEffect(() => {
@@ -96,11 +102,16 @@ export function useWebSocket({
       };
       setMessages((prev: ChatMessage[]) => [...prev, msg]);
     },
-    []
+    [],
   );
 
   const sendZoteroActionResult = useCallback(
-    (requestId: string, success: boolean, resultData?: unknown, error?: string): void => {
+    (
+      requestId: string,
+      success: boolean,
+      resultData?: unknown,
+      error?: string,
+    ): void => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         const msg: Record<string, unknown> = {
           type: "zotero_action_result",
@@ -115,7 +126,7 @@ export function useWebSocket({
         wsRef.current.send(JSON.stringify(msg));
       }
     },
-    []
+    [],
   );
 
   const handleZoteroAction = useCallback(
@@ -132,7 +143,12 @@ export function useWebSocket({
 
         if (!response.ok) {
           const errorText: string = await response.text();
-          sendZoteroActionResult(requestId, false, undefined, `Plugin error (${response.status}): ${errorText}`);
+          sendZoteroActionResult(
+            requestId,
+            false,
+            undefined,
+            `Plugin error (${response.status}): ${errorText}`,
+          );
           return;
         }
 
@@ -149,7 +165,7 @@ export function useWebSocket({
         sendZoteroActionResult(requestId, false, undefined, errorMsg);
       }
     },
-    [sendZoteroActionResult]
+    [sendZoteroActionResult],
   );
 
   const handleMessage = useCallback(
@@ -262,7 +278,8 @@ export function useWebSocket({
               deep_analysis: "Advanced analysis unavailable",
               search_zotero_library: "Zotero search failed",
             };
-            const friendlyMsg: string = errorMessages[tc.toolName] || `Tool failed: ${tc.toolName}`;
+            const friendlyMsg: string =
+              errorMessages[tc.toolName] || `Tool failed: ${tc.toolName}`;
             toast.error(tc.error ? `${friendlyMsg}: ${tc.error}` : friendlyMsg);
           }
           setMessages((prev: ChatMessage[]) => {
@@ -324,7 +341,7 @@ export function useWebSocket({
         }
       }
     },
-    [onAudioData, onInterrupted, addMessage, handleZoteroAction]
+    [onAudioData, onInterrupted, addMessage, handleZoteroAction],
   );
 
   const connectToUrl = useCallback(
@@ -376,7 +393,7 @@ export function useWebSocket({
         wsRef.current = null;
         if (!intentionalCloseRef.current) {
           setStatus("reconnecting");
-          scheduleReconnect();
+          scheduleReconnectRef.current();
         } else {
           setStatus("disconnected");
         }
@@ -386,7 +403,7 @@ export function useWebSocket({
         // onclose will fire after onerror
       };
     },
-    [handleMessage]
+    [handleMessage],
   );
 
   const scheduleReconnect = useCallback((): void => {
@@ -416,6 +433,9 @@ export function useWebSocket({
     }, delay);
   }, [connectToUrl]);
 
+  // Keep ref in sync so connectToUrl can call scheduleReconnect without a circular dep
+  scheduleReconnectRef.current = scheduleReconnect;
+
   const connect = useCallback((): void => {
     triedFallbackRef.current = false;
     reconnectAttemptRef.current = 0;
@@ -443,7 +463,7 @@ export function useWebSocket({
     (base64Pcm: string): void => {
       sendRaw({ type: "audio", data: base64Pcm });
     },
-    [sendRaw]
+    [sendRaw],
   );
 
   const sendText = useCallback(
@@ -451,14 +471,14 @@ export function useWebSocket({
       addMessage("user", content, "text");
       sendRaw({ type: "text", content });
     },
-    [sendRaw, addMessage]
+    [sendRaw, addMessage],
   );
 
   const sendPaperContext = useCallback(
     (payload: Record<string, unknown>): void => {
       sendRaw({ type: "paper_context", ...payload });
     },
-    [sendRaw]
+    [sendRaw],
   );
 
   const sendControl = useCallback(
@@ -467,7 +487,7 @@ export function useWebSocket({
       if (mode) msg.mode = mode;
       sendRaw(msg);
     },
-    [sendRaw]
+    [sendRaw],
   );
 
   useEffect(() => {

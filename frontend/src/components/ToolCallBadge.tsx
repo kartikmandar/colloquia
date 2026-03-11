@@ -52,15 +52,15 @@ function ToolCallBadge({
       <button
         type="button"
         onClick={(): void => setExpanded(!expanded)}
-        className={`flex items-center gap-1.5 rounded px-2 py-1 text-[11px] transition-colors ${
+        className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
           status === "error"
-            ? "bg-red-100 text-red-700 hover:bg-red-200"
-            : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+            ? "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+            : "bg-surface-tertiary text-text-secondary hover:bg-border-primary"
         }`}
       >
         <span>{icon}</span>
         <span className="font-mono font-medium">{toolName}</span>
-        {duration && <span className="text-gray-400">{duration}</span>}
+        {duration && <span className="text-text-tertiary">{duration}</span>}
         <span>{statusIcon}</span>
         <svg
           className={`h-3 w-3 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -76,25 +76,27 @@ function ToolCallBadge({
       </button>
 
       {expanded && (
-        <div className="mt-1 rounded border border-gray-200 bg-gray-50 p-2 text-[10px]">
+        <div className="mt-1 rounded-lg border border-border-primary bg-surface-secondary p-2 text-xs">
           {input && Object.keys(input).length > 0 && (
             <div className="mb-1.5">
-              <span className="font-semibold text-gray-500">Input:</span>
-              <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-all font-mono text-gray-700">
+              <span className="font-semibold text-text-secondary">Input:</span>
+              <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-all font-mono text-text-primary">
                 {JSON.stringify(input, null, 2)}
               </pre>
             </div>
           )}
           {status === "done" && output !== undefined && (
             <div>
-              <span className="font-semibold text-gray-500">Output:</span>
-              <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-all font-mono text-gray-700">
-                {typeof output === "string" ? output : JSON.stringify(output, null, 2)}
+              <span className="font-semibold text-text-secondary">Output:</span>
+              <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap break-all font-mono text-text-primary">
+                {typeof output === "string"
+                  ? output
+                  : JSON.stringify(output, null, 2)}
               </pre>
             </div>
           )}
           {status === "error" && error && (
-            <div className="text-red-600">
+            <div className="text-red-600 dark:text-red-400">
               <span className="font-semibold">Error:</span> {error}
             </div>
           )}

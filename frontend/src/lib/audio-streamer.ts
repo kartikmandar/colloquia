@@ -42,7 +42,7 @@ export class AudioStreamer {
   async addWorklet<T extends (d: MessageEvent) => void>(
     workletName: string,
     workletSrc: string,
-    handler: T
+    handler: T,
   ): Promise<this> {
     let workletsRecord: Record<string, WorkletGraph> | undefined =
       registeredWorklets.get(this.context);
@@ -63,7 +63,7 @@ export class AudioStreamer {
     await this.context.audioWorklet.addModule(src);
     const worklet: AudioWorkletNode = new AudioWorkletNode(
       this.context,
-      workletName
+      workletName,
     );
     workletsRecord[workletName].node = worklet;
 
@@ -111,7 +111,7 @@ export class AudioStreamer {
     const audioBuffer: AudioBuffer = this.context.createBuffer(
       1,
       audioData.length,
-      this.sampleRate
+      this.sampleRate,
     );
     audioBuffer.getChannelData(0).set(audioData);
     return audioBuffer;
@@ -152,7 +152,7 @@ export class AudioStreamer {
 
       if (worklets) {
         Object.entries(worklets).forEach(
-          ([_workletName, graph]: [string, WorkletGraph]) => {
+          ([, graph]: [string, WorkletGraph]) => {
             const { node, handlers } = graph;
             if (node) {
               source.connect(node);
@@ -163,13 +163,13 @@ export class AudioStreamer {
               };
               node.connect(this.context.destination);
             }
-          }
+          },
         );
       }
 
       const startTime: number = Math.max(
         this.scheduledTime,
-        this.context.currentTime
+        this.context.currentTime,
       );
       source.start(startTime);
       this.scheduledTime = startTime + audioBuffer.duration;
@@ -196,7 +196,7 @@ export class AudioStreamer {
         (this.scheduledTime - this.context.currentTime) * 1000;
       setTimeout(
         () => this.scheduleNextBuffer(),
-        Math.max(0, nextCheckTime - 50)
+        Math.max(0, nextCheckTime - 50),
       );
     }
   }
@@ -217,7 +217,7 @@ export class AudioStreamer {
 
     this.gainNode.gain.linearRampToValueAtTime(
       0,
-      this.context.currentTime + 0.1
+      this.context.currentTime + 0.1,
     );
 
     setTimeout(() => {

@@ -57,25 +57,27 @@ export async function loadPaper(paperKey: string): Promise<LoadPaperResult> {
   // Extract annotations from children
   const annotations: PaperAnnotation[] = children
     .filter((child: ZoteroItem) => child.data.itemType === "annotation")
-    .map((ann: ZoteroItem): PaperAnnotation => ({
-      key: ann.key,
-      type: (ann.data as Record<string, unknown>).annotationType as
-        | "highlight"
-        | "note"
-        | "image",
-      comment: (ann.data as Record<string, unknown>).annotationComment as
-        | string
-        | undefined,
-      text: (ann.data as Record<string, unknown>).annotationText as
-        | string
-        | undefined,
-      pageLabel: (ann.data as Record<string, unknown>).annotationPageLabel as
-        | string
-        | undefined,
-      color: (ann.data as Record<string, unknown>).annotationColor as
-        | string
-        | undefined,
-    }));
+    .map(
+      (ann: ZoteroItem): PaperAnnotation => ({
+        key: ann.key,
+        type: (ann.data as Record<string, unknown>).annotationType as
+          | "highlight"
+          | "note"
+          | "image",
+        comment: (ann.data as Record<string, unknown>).annotationComment as
+          | string
+          | undefined,
+        text: (ann.data as Record<string, unknown>).annotationText as
+          | string
+          | undefined,
+        pageLabel: (ann.data as Record<string, unknown>).annotationPageLabel as
+          | string
+          | undefined,
+        color: (ann.data as Record<string, unknown>).annotationColor as
+          | string
+          | undefined,
+      }),
+    );
 
   // Also check if the PDF attachment has its own children (nested annotations)
   let nestedAnnotations: PaperAnnotation[] = [];
@@ -86,23 +88,26 @@ export async function loadPaper(paperKey: string): Promise<LoadPaperResult> {
       );
       nestedAnnotations = pdfChildren
         .filter((child: ZoteroItem) => child.data.itemType === "annotation")
-        .map((ann: ZoteroItem): PaperAnnotation => ({
-          key: ann.key,
-          type: (ann.data as Record<string, unknown>).annotationType as
-            | "highlight"
-            | "note"
-            | "image",
-          comment: (ann.data as Record<string, unknown>)
-            .annotationComment as string | undefined,
-          text: (ann.data as Record<string, unknown>).annotationText as
-            | string
-            | undefined,
-          pageLabel: (ann.data as Record<string, unknown>)
-            .annotationPageLabel as string | undefined,
-          color: (ann.data as Record<string, unknown>).annotationColor as
-            | string
-            | undefined,
-        }));
+        .map(
+          (ann: ZoteroItem): PaperAnnotation => ({
+            key: ann.key,
+            type: (ann.data as Record<string, unknown>).annotationType as
+              | "highlight"
+              | "note"
+              | "image",
+            comment: (ann.data as Record<string, unknown>).annotationComment as
+              | string
+              | undefined,
+            text: (ann.data as Record<string, unknown>).annotationText as
+              | string
+              | undefined,
+            pageLabel: (ann.data as Record<string, unknown>)
+              .annotationPageLabel as string | undefined,
+            color: (ann.data as Record<string, unknown>).annotationColor as
+              | string
+              | undefined,
+          }),
+        );
     } catch {
       // Nested children fetch failed — non-critical
     }

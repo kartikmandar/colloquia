@@ -18,7 +18,7 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
       return "Gemini API key is required.";
     }
     if (!key.startsWith("AI") || key.length <= 20) {
-      return "Invalid key format. A Gemini API key starts with \"AI\" and is longer than 20 characters.";
+      return 'Invalid key format. A Gemini API key starts with "AI" and is longer than 20 characters.';
     }
     return "";
   };
@@ -47,12 +47,12 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-100 p-4">
-      <div className="w-full max-w-md rounded-xl bg-white p-8 shadow-lg">
+    <div className="flex min-h-screen items-center justify-center bg-surface-tertiary p-4">
+      <div className="w-full max-w-md rounded-xl bg-surface-primary p-8 shadow-overlay">
         {/* Header */}
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-gray-900">Colloquia</h1>
-          <p className="mt-2 text-sm text-gray-500">
+          <img src="/logo.svg" alt="Colloquia" className="mx-auto h-12" />
+          <p className="mt-2 text-sm text-text-secondary">
             Voice-powered research assistant
           </p>
         </div>
@@ -62,7 +62,7 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
           <div>
             <label
               htmlFor="gemini-key"
-              className="mb-1 block text-sm font-medium text-gray-700"
+              className="mb-1 block text-sm font-medium text-text-primary"
             >
               Gemini API Key <span className="text-red-500">*</span>
             </label>
@@ -76,24 +76,26 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
                   if (geminiError) setGeminiError("");
                 }}
                 placeholder="Enter your Gemini API key"
-                className={`w-full rounded-lg border px-4 py-2.5 pr-16 text-sm outline-none transition-colors focus:ring-2 ${
+                className={`w-full rounded-lg border px-4 py-2.5 pr-16 text-sm text-text-primary bg-surface-primary outline-none transition-colors focus:ring-2 ${
                   geminiError
-                    ? "border-red-400 focus:border-red-500 focus:ring-red-200"
-                    : "border-gray-300 focus:border-blue-500 focus:ring-blue-200"
+                    ? "border-red-400 focus:border-red-500 focus:ring-red-200 dark:border-red-600 dark:focus:ring-red-900"
+                    : "border-border-primary focus:border-accent-primary focus:ring-accent-primary/20"
                 }`}
               />
               <button
                 type="button"
                 onClick={(): void => setShowGeminiKey(!showGeminiKey)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary"
               >
                 {showGeminiKey ? "Hide" : "Show"}
               </button>
             </div>
             {geminiError && (
-              <p className="mt-1.5 text-sm text-red-600">{geminiError}</p>
+              <p className="mt-1.5 text-sm text-red-600 dark:text-red-400">
+                {geminiError}
+              </p>
             )}
-            <p className="mt-1.5 text-xs text-gray-400">
+            <p className="mt-1.5 text-xs text-text-tertiary">
               Get a key from Google AI Studio
             </p>
           </div>
@@ -102,10 +104,10 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
           <div>
             <label
               htmlFor="s2-key"
-              className="mb-1 block text-sm font-medium text-gray-700"
+              className="mb-1 block text-sm font-medium text-text-primary"
             >
               Semantic Scholar API Key{" "}
-              <span className="text-xs font-normal text-gray-400">
+              <span className="text-xs font-normal text-text-tertiary">
                 (optional)
               </span>
             </label>
@@ -118,12 +120,12 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
                   setS2KeyState(e.target.value)
                 }
                 placeholder="Optional — for higher rate limits"
-                className="w-full rounded-lg border border-gray-300 px-4 py-2.5 pr-16 text-sm outline-none transition-colors focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                className="w-full rounded-lg border border-border-primary bg-surface-primary px-4 py-2.5 pr-16 text-sm text-text-primary outline-none transition-colors focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20"
               />
               <button
                 type="button"
                 onClick={(): void => setShowS2Key(!showS2Key)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-gray-500 hover:text-gray-700"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary"
               >
                 {showS2Key ? "Hide" : "Show"}
               </button>
@@ -131,7 +133,7 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
           </div>
 
           {/* Privacy Notice */}
-          <p className="text-center text-xs text-gray-400">
+          <p className="text-center text-xs text-text-tertiary">
             Your API key is stored locally in your browser and never sent to our
             servers.
           </p>
@@ -140,7 +142,7 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
           <button
             type="submit"
             disabled={isLoading}
-            className="flex w-full items-center justify-center rounded-lg bg-blue-600 px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center justify-center rounded-lg bg-accent-primary px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isLoading ? (
               <span className="flex items-center gap-2">

@@ -7,10 +7,8 @@
 // ============================================================
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import type {
-  ZoteroItem,
-  ZoteroCollection,
-} from "../lib/zoteroApi";
+import { Panel, Group } from "react-resizable-panels";
+import type { ZoteroItem, ZoteroCollection } from "../lib/zoteroApi";
 import {
   fetchTopItems,
   fetchCollections,
@@ -21,6 +19,7 @@ import {
   extractYear,
   getVenue,
 } from "../lib/zoteroApi";
+import ResizeHandle from "./ResizeHandle";
 
 // ------------------------------------------------------------
 // Props
@@ -38,14 +37,14 @@ interface PaperBrowserProps {
 function LoadingSpinner(): React.ReactElement {
   return (
     <div className="flex items-center justify-center py-12">
-      <div className="h-8 w-8 animate-spin rounded-full border-4 border-gray-200 border-t-blue-600" />
+      <div className="h-8 w-8 animate-spin rounded-full border-4 border-border-primary border-t-accent-primary" />
     </div>
   );
 }
 
 function ErrorBanner({ message }: { message: string }): React.ReactElement {
   return (
-    <div className="mx-4 my-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+    <div className="mx-4 my-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950 dark:text-red-400">
       {message}
     </div>
   );
@@ -53,7 +52,7 @@ function ErrorBanner({ message }: { message: string }): React.ReactElement {
 
 function EmptyState({ message }: { message: string }): React.ReactElement {
   return (
-    <div className="flex flex-col items-center justify-center py-16 text-gray-400">
+    <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
       <svg
         xmlns="http://www.w3.org/2000/svg"
         className="mb-3 h-12 w-12"
@@ -93,8 +92,8 @@ function CollectionSidebar({
   error,
 }: CollectionSidebarProps): React.ReactElement {
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-gray-200 bg-gray-50">
-      <h2 className="border-b border-gray-200 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
+    <aside className="flex h-full flex-col border-r border-border-primary bg-surface-secondary">
+      <h2 className="border-b border-border-primary px-4 py-3 text-xs font-semibold uppercase tracking-wider text-text-secondary">
         Collections
       </h2>
 
@@ -107,8 +106,8 @@ function CollectionSidebar({
             onClick={() => onSelect(null)}
             className={`w-full px-4 py-2 text-left text-sm transition-colors ${
               activeKey === null
-                ? "bg-blue-50 font-medium text-blue-700"
-                : "text-gray-700 hover:bg-gray-100"
+                ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-400"
+                : "text-text-primary hover:bg-surface-tertiary"
             }`}
           >
             All Papers
@@ -119,8 +118,8 @@ function CollectionSidebar({
               onClick={() => onSelect(col.key)}
               className={`w-full px-4 py-2 text-left text-sm transition-colors ${
                 activeKey === col.key
-                  ? "bg-blue-50 font-medium text-blue-700"
-                  : "text-gray-700 hover:bg-gray-100"
+                  ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-400"
+                  : "text-text-primary hover:bg-surface-tertiary"
               }`}
             >
               {col.data.name}
@@ -151,7 +150,7 @@ function SearchBar({
     <div className="relative">
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+        className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -170,12 +169,12 @@ function SearchBar({
           onChange(e.target.value)
         }
         placeholder="Search papers..."
-        className="w-full rounded-lg border border-gray-200 bg-white py-2 pl-10 pr-9 text-sm text-gray-900 placeholder-gray-400 outline-none transition-colors focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+        className="w-full rounded-lg border border-border-primary bg-surface-primary py-2 pl-10 pr-9 text-sm text-text-primary placeholder-text-tertiary outline-none transition-colors focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20"
       />
       {value.length > 0 && (
         <button
           onClick={onClear}
-          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-gray-400 hover:text-gray-600"
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-text-tertiary transition-colors hover:text-text-secondary"
           aria-label="Clear search"
         >
           <svg
@@ -220,25 +219,24 @@ function PaperRow({
   return (
     <button
       onClick={onSelect}
-      className={`w-full border-b border-gray-100 px-4 py-3 text-left transition-colors ${
+      className={`w-full border-b border-border-secondary px-4 py-3 text-left transition-colors ${
         isSelected
-          ? "bg-blue-50 border-l-2 border-l-blue-600"
-          : "hover:bg-gray-50"
+          ? "bg-blue-50 border-l-2 border-l-blue-600 dark:bg-blue-950 dark:border-l-blue-400"
+          : "hover:bg-surface-secondary"
       }`}
     >
       <p
-        className={`text-sm leading-snug ${isSelected ? "font-semibold text-blue-900" : "font-medium text-gray-900"}`}
+        className={`text-sm leading-snug ${isSelected ? "font-semibold text-blue-900 dark:text-blue-300" : "font-medium text-text-primary"}`}
       >
         {item.data.title || "Untitled"}
       </p>
-      <p className="mt-1 text-xs text-gray-500">
+      <p className="mt-1 text-xs text-text-secondary">
         {authors}
         {year && ` (${year})`}
         {venue && (
           <>
             {" "}
-            &mdash;{" "}
-            <span className="italic">{venue}</span>
+            &mdash; <span className="italic">{venue}</span>
           </>
         )}
       </p>
@@ -268,15 +266,15 @@ function PaperDetail({
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="p-6">
         {/* Title */}
-        <h2 className="text-xl font-bold leading-tight text-gray-900">
+        <h2 className="text-xl font-bold leading-tight text-text-primary">
           {data.title || "Untitled"}
         </h2>
 
         {/* Authors */}
-        <p className="mt-2 text-sm text-gray-600">{authors}</p>
+        <p className="mt-2 text-sm text-text-secondary">{authors}</p>
 
         {/* Year & Venue */}
-        <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
+        <div className="mt-2 flex flex-wrap gap-2 text-xs text-text-secondary">
           {year && <span>{year}</span>}
           {year && venue && <span>&middot;</span>}
           {venue && <span className="italic">{venue}</span>}
@@ -284,13 +282,13 @@ function PaperDetail({
 
         {/* DOI */}
         {data.DOI && (
-          <p className="mt-2 text-xs text-gray-400">
+          <p className="mt-2 text-xs text-text-tertiary">
             DOI:{" "}
             <a
               href={`https://doi.org/${data.DOI}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-blue-500 underline hover:text-blue-700"
+              className="text-accent-primary underline transition-colors hover:text-accent-primary-hover"
             >
               {data.DOI}
             </a>
@@ -303,7 +301,7 @@ function PaperDetail({
             {data.tags.map((t: { tag: string }, i: number) => (
               <span
                 key={i}
-                className="inline-block rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600"
+                className="inline-block rounded-full bg-surface-tertiary px-2.5 py-0.5 text-xs font-medium text-text-secondary"
               >
                 {t.tag}
               </span>
@@ -314,10 +312,10 @@ function PaperDetail({
         {/* Abstract */}
         {data.abstractNote && (
           <div className="mt-4">
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-500">
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-text-secondary">
               Abstract
             </h3>
-            <p className="text-sm leading-relaxed text-gray-700">
+            <p className="text-sm leading-relaxed text-text-primary">
               {data.abstractNote}
             </p>
           </div>
@@ -326,7 +324,7 @@ function PaperDetail({
         {/* Open Discussion button */}
         <button
           onClick={onOpenDiscussion}
-          className="mt-6 w-full rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+          className="mt-6 w-full rounded-lg bg-accent-primary px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover focus:outline-none focus:ring-2 focus:ring-accent-primary focus:ring-offset-2"
         >
           Add to chat context
         </button>
@@ -390,7 +388,7 @@ function PaperBrowser({
     };
 
     void load();
-    return () => {
+    return (): void => {
       cancelled = true;
     };
   }, []);
@@ -429,38 +427,35 @@ function PaperBrowser({
   // ----------------------------------------------------------
   // Debounced search
   // ----------------------------------------------------------
-  const handleSearchChange = useCallback(
-    (value: string): void => {
-      setSearchQuery(value);
+  const handleSearchChange = useCallback((value: string): void => {
+    setSearchQuery(value);
 
-      if (searchTimerRef.current !== null) {
-        clearTimeout(searchTimerRef.current);
-      }
+    if (searchTimerRef.current !== null) {
+      clearTimeout(searchTimerRef.current);
+    }
 
-      if (value.trim().length === 0) {
+    if (value.trim().length === 0) {
+      setIsSearching(false);
+      return;
+    }
+
+    setIsSearching(true);
+    searchTimerRef.current = setTimeout(async () => {
+      setPapersLoading(true);
+      setPapersError(null);
+      try {
+        const result: ZoteroItem[] = await searchItems(value.trim());
+        setPapers(result);
+      } catch (err: unknown) {
+        const message: string =
+          err instanceof Error ? err.message : "Search failed";
+        setPapersError(message);
+      } finally {
+        setPapersLoading(false);
         setIsSearching(false);
-        return;
       }
-
-      setIsSearching(true);
-      searchTimerRef.current = setTimeout(async () => {
-        setPapersLoading(true);
-        setPapersError(null);
-        try {
-          const result: ZoteroItem[] = await searchItems(value.trim());
-          setPapers(result);
-        } catch (err: unknown) {
-          const message: string =
-            err instanceof Error ? err.message : "Search failed";
-          setPapersError(message);
-        } finally {
-          setPapersLoading(false);
-          setIsSearching(false);
-        }
-      }, 300);
-    },
-    [],
-  );
+    }, 300);
+  }, []);
 
   const handleClearSearch = useCallback((): void => {
     setSearchQuery("");
@@ -472,7 +467,7 @@ function PaperBrowser({
 
   // Cleanup timer on unmount
   useEffect(() => {
-    return () => {
+    return (): void => {
       if (searchTimerRef.current !== null) {
         clearTimeout(searchTimerRef.current);
       }
@@ -482,17 +477,14 @@ function PaperBrowser({
   // ----------------------------------------------------------
   // Handlers
   // ----------------------------------------------------------
-  const handleCollectionSelect = useCallback(
-    (key: string | null): void => {
-      setActiveCollection(key);
-      setSearchQuery("");
-      setIsSearching(false);
-      if (searchTimerRef.current !== null) {
-        clearTimeout(searchTimerRef.current);
-      }
-    },
-    [],
-  );
+  const handleCollectionSelect = useCallback((key: string | null): void => {
+    setActiveCollection(key);
+    setSearchQuery("");
+    setIsSearching(false);
+    if (searchTimerRef.current !== null) {
+      clearTimeout(searchTimerRef.current);
+    }
+  }, []);
 
   const handlePaperClick = useCallback(
     (item: ZoteroItem): void => {
@@ -512,67 +504,75 @@ function PaperBrowser({
   // Render
   // ----------------------------------------------------------
   return (
-    <div className="flex h-full w-full overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
-      {/* Collection sidebar */}
-      <CollectionSidebar
-        collections={collections}
-        activeKey={activeCollection}
-        onSelect={handleCollectionSelect}
-        loading={collectionsLoading}
-        error={collectionsError}
-      />
-
-      {/* Paper list */}
-      <div className="flex min-w-0 flex-1 flex-col border-r border-gray-200">
-        {/* Search */}
-        <div className="border-b border-gray-200 p-3">
-          <SearchBar
-            value={searchQuery}
-            onChange={handleSearchChange}
-            onClear={handleClearSearch}
+    <div className="flex h-full w-full overflow-hidden rounded-xl border border-border-primary bg-surface-primary shadow-panel">
+      <Group orientation="horizontal">
+        <Panel defaultSize="20%" minSize="12%" maxSize="30%">
+          {/* Collection sidebar */}
+          <CollectionSidebar
+            collections={collections}
+            activeKey={activeCollection}
+            onSelect={handleCollectionSelect}
+            loading={collectionsLoading}
+            error={collectionsError}
           />
-        </div>
-
-        {/* List */}
-        <div className="flex-1 overflow-y-auto">
-          {papersLoading || isSearching ? (
-            <LoadingSpinner />
-          ) : papersError ? (
-            <ErrorBanner message={papersError} />
-          ) : papers.length === 0 ? (
-            <EmptyState
-              message={
-                searchQuery.length > 0
-                  ? "No results found"
-                  : "No papers in this collection"
-              }
-            />
-          ) : (
-            papers.map((item: ZoteroItem) => (
-              <PaperRow
-                key={item.key}
-                item={item}
-                isSelected={selectedPaper?.key === item.key}
-                onSelect={() => handlePaperClick(item)}
+        </Panel>
+        <ResizeHandle />
+        <Panel defaultSize="45%" minSize="20%">
+          {/* Paper list */}
+          <div className="flex h-full min-w-0 flex-col border-r border-border-primary">
+            {/* Search */}
+            <div className="border-b border-border-primary p-3">
+              <SearchBar
+                value={searchQuery}
+                onChange={handleSearchChange}
+                onClear={handleClearSearch}
               />
-            ))
-          )}
-        </div>
-      </div>
+            </div>
 
-      {/* Detail panel */}
-      <div className="hidden w-96 shrink-0 flex-col lg:flex">
-        {selectedPaper ? (
-          <PaperDetail
-            item={selectedPaper}
-            onOpenDiscussion={handleOpenDiscussion}
-          />
-        ) : (
-          <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-gray-400">
-            Select a paper to view details
+            {/* List */}
+            <div className="flex-1 overflow-y-auto">
+              {papersLoading || isSearching ? (
+                <LoadingSpinner />
+              ) : papersError ? (
+                <ErrorBanner message={papersError} />
+              ) : papers.length === 0 ? (
+                <EmptyState
+                  message={
+                    searchQuery.length > 0
+                      ? "No results found"
+                      : "No papers in this collection"
+                  }
+                />
+              ) : (
+                papers.map((item: ZoteroItem) => (
+                  <PaperRow
+                    key={item.key}
+                    item={item}
+                    isSelected={selectedPaper?.key === item.key}
+                    onSelect={() => handlePaperClick(item)}
+                  />
+                ))
+              )}
+            </div>
           </div>
-        )}
-      </div>
+        </Panel>
+        <ResizeHandle />
+        <Panel defaultSize="35%" minSize="20%">
+          {/* Detail panel */}
+          <div className="flex h-full flex-col">
+            {selectedPaper ? (
+              <PaperDetail
+                item={selectedPaper}
+                onOpenDiscussion={handleOpenDiscussion}
+              />
+            ) : (
+              <div className="flex flex-1 items-center justify-center p-8 text-center text-sm text-text-tertiary">
+                Select a paper to view details
+              </div>
+            )}
+          </div>
+        </Panel>
+      </Group>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { Panel, Group } from "react-resizable-panels";
 import { getGeminiKey } from "../lib/apiKeys";
 import { useZoteroHealth } from "../hooks/useZoteroHealth";
 import { useWebSocket } from "../hooks/useWebSocket";
@@ -14,12 +15,17 @@ import ConnectionBadge from "../components/ConnectionBadge";
 import ChatPanel from "../components/ChatPanel";
 import MicButton from "../components/MicButton";
 import ContextUsageBar from "../components/ContextUsageBar";
+import ResizeHandle from "../components/ResizeHandle";
 
 interface MainAppProps {
   onBackToSetup: () => void;
+  themeState: { theme: "light" | "dark"; toggleTheme: () => void };
 }
 
-function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
+function MainApp({
+  onBackToSetup,
+  themeState,
+}: MainAppProps): React.ReactElement {
   const [wsUrl, setWsUrl] = useState<string>("ws://localhost:8000/ws");
 
   // Resolve best backend URL on mount
@@ -34,7 +40,7 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     : "";
   const { state: zoteroState, refresh: zoteroRefresh } = useZoteroHealth();
 
-  const [_selectedPaperKey, setSelectedPaperKey] = useState<string | null>(null);
+  const [, setSelectedPaperKey] = useState<string | null>(null);
   const [loadedPaperTitle, setLoadedPaperTitle] = useState<string | null>(null);
   const [paperLoading, setPaperLoading] = useState<boolean>(false);
   const [chatMode, setChatMode] = useState<"voice" | "text">("voice");
@@ -65,7 +71,7 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
       }
       streamer.addPCM16(bytes);
     },
-    [getAudioStreamer]
+    [getAudioStreamer],
   );
 
   // WebSocket connection
@@ -90,21 +96,13 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
   const isConnected: boolean = status === "connected";
 
   // Audio capture (mic → WebSocket)
-  const {
-    isCapturing,
-    volume,
-    startCapture,
-    stopCapture,
-  } = useAudioCapture({
+  const { isCapturing, volume, startCapture, stopCapture } = useAudioCapture({
     onAudioData: sendAudio,
   });
 
-  const handlePaperSelect = useCallback(
-    (paperKey: string): void => {
-      setSelectedPaperKey(paperKey);
-    },
-    [],
-  );
+  const handlePaperSelect = useCallback((paperKey: string): void => {
+    setSelectedPaperKey(paperKey);
+  }, []);
 
   const handleOpenDiscussion = useCallback(
     async (paperKey: string): Promise<void> => {
@@ -169,15 +167,28 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
 
   return (
     <div className="flex h-screen flex-col">
-      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
+      <Toaster
+        position="top-right"
+        toastOptions={{
+          duration: 4000,
+          style: {
+            background: "var(--color-surface-primary)",
+            color: "var(--color-text-primary)",
+            border: "1px solid var(--color-border-primary)",
+          },
+        }}
+      />
       {/* Top bar */}
-      <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
-        <h1 className="text-lg font-bold text-gray-900">Colloquia</h1>
+      <header className="flex items-center justify-between border-b border-border-primary bg-surface-primary/80 px-6 py-3 backdrop-blur-sm">
+        <img src="/logo.svg" alt="Colloquia" className="h-7" />
 
         <div className="flex items-center gap-3">
           <ConnectionBadge status={status} />
           {status !== "disconnected" && (
-            <span className="text-[10px] text-gray-400 max-w-32 truncate" title={activeUrl}>
+            <span
+              className="text-xs text-text-tertiary max-w-32 truncate"
+              title={activeUrl}
+            >
               {activeUrl.includes("localhost") ? "local" : "cloud"}
             </span>
           )}
@@ -191,26 +202,46 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
             onClick={handleConnect}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
               isConnected
-                ? "bg-red-50 text-red-600 hover:bg-red-100"
-                : "bg-blue-50 text-blue-600 hover:bg-blue-100"
+                ? "bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
+                : "bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
             }`}
           >
             {isConnected ? "Disconnect" : "Connect"}
           </button>
           <ZoteroStatus state={zoteroState} onRefresh={zoteroRefresh} />
           {maskedKey && (
-            <span className="text-xs font-mono text-gray-400">
+            <span className="text-xs font-mono text-text-tertiary">
               {maskedKey}
             </span>
           )}
+          {/* Theme toggle */}
+          <button
+            onClick={themeState.toggleTheme}
+            aria-label="Toggle theme"
+            className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-tertiary"
+          >
+            {themeState.theme === "light" ? (
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+              </svg>
+            ) : (
+              <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path
+                  fillRule="evenodd"
+                  d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </button>
           <button
             onClick={onBackToSetup}
             aria-label="Settings"
-            className="rounded-lg border border-gray-200 p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700"
+            className="rounded-lg border border-border-primary p-2 text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
+              className="h-4 w-4"
               viewBox="0 0 20 20"
               fill="currentColor"
             >
@@ -224,87 +255,140 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
         </div>
       </header>
 
-      {/* Main content — split layout */}
-      <main className="relative flex flex-1 overflow-hidden">
-        {/* Left: Paper browser */}
-        <div className="flex-1 overflow-hidden border-r border-gray-200 p-4">
-          <PaperBrowser onPaperSelect={handlePaperSelect} onOpenDiscussion={handleOpenDiscussion} />
-        </div>
-
-        {/* Right: Chat + voice panel */}
-        <div className="flex w-96 flex-col bg-white">
-          {/* Paper loading indicator */}
-          {paperLoading && (
-            <div className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700">
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Loading paper context...
+      {/* Main content — resizable split layout */}
+      <main className="relative flex-1 overflow-hidden">
+        <Group orientation="horizontal">
+          <Panel defaultSize="65%" minSize="30%">
+            <div className="h-full overflow-hidden p-4">
+              <PaperBrowser
+                onPaperSelect={handlePaperSelect}
+                onOpenDiscussion={handleOpenDiscussion}
+              />
             </div>
-          )}
-          {loadedPaperTitle && !paperLoading && (
-            <div className="flex items-center justify-between border-b border-purple-100 bg-purple-50 px-4 py-2 text-xs text-purple-700">
-              <span className="font-medium truncate" title={loadedPaperTitle}>
-                Discussing: {loadedPaperTitle}
-              </span>
-              <button
-                onClick={handleBackToLibrary}
-                className="ml-2 shrink-0 rounded px-2 py-0.5 text-[10px] font-medium text-purple-600 transition-colors hover:bg-purple-200"
-              >
-                Back to Library
-              </button>
-            </div>
-          )}
-          {/* Chat messages */}
-          <div className="flex-1 overflow-hidden">
-            <ChatPanel
-              messages={messages}
-              onSendText={sendText}
-              isConnected={isConnected}
-              showTextInput={chatMode === "text"}
-            />
-          </div>
-
-          {/* Input area */}
-          <div className="flex items-center gap-2 border-t border-gray-200 px-3 py-3">
-            <button
-              onClick={() => setChatMode(chatMode === "voice" ? "text" : "voice")}
-              className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100"
-              title={chatMode === "voice" ? "Switch to text mode" : "Switch to voice mode"}
-            >
-              {chatMode === "voice" ? (
-                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z" clipRule="evenodd" />
-                </svg>
-              ) : (
-                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
-                </svg>
+          </Panel>
+          <ResizeHandle />
+          <Panel defaultSize="35%" minSize="20%">
+            {/* Right: Chat + voice panel */}
+            <div className="flex h-full flex-col bg-surface-primary">
+              {/* Paper loading indicator */}
+              {paperLoading && (
+                <div className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
+                  <svg
+                    className="h-4 w-4 animate-spin"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                    />
+                  </svg>
+                  Loading paper context...
+                </div>
               )}
-            </button>
-            {chatMode === "voice" ? (
-              <div className="flex flex-1 justify-center">
-                <MicButton
-                  isCapturing={isCapturing}
+              {loadedPaperTitle && !paperLoading && (
+                <div className="flex items-center justify-between border-b border-purple-100 bg-purple-50 px-4 py-2 text-xs text-purple-700 dark:border-purple-900 dark:bg-purple-950 dark:text-purple-300">
+                  <span
+                    className="font-medium truncate"
+                    title={loadedPaperTitle}
+                  >
+                    Discussing: {loadedPaperTitle}
+                  </span>
+                  <button
+                    onClick={handleBackToLibrary}
+                    className="ml-2 shrink-0 rounded-lg px-2 py-0.5 text-xs font-medium text-purple-600 transition-colors hover:bg-purple-200 dark:text-purple-400 dark:hover:bg-purple-900"
+                  >
+                    Back to Library
+                  </button>
+                </div>
+              )}
+              {/* Chat messages */}
+              <div className="flex-1 overflow-hidden">
+                <ChatPanel
+                  messages={messages}
+                  onSendText={sendText}
                   isConnected={isConnected}
-                  volume={volume}
-                  onToggle={handleMicToggle}
+                  showTextInput={chatMode === "text"}
                 />
               </div>
-            ) : null}
-          </div>
-        </div>
+
+              {/* Input area */}
+              <div className="flex items-center gap-2 border-t border-border-primary px-3 py-3">
+                <button
+                  onClick={() =>
+                    setChatMode(chatMode === "voice" ? "text" : "voice")
+                  }
+                  className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-tertiary"
+                  title={
+                    chatMode === "voice"
+                      ? "Switch to text mode"
+                      : "Switch to voice mode"
+                  }
+                >
+                  {chatMode === "voice" ? (
+                    <svg
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      className="h-4 w-4"
+                      viewBox="0 0 20 20"
+                      fill="currentColor"
+                    >
+                      <path
+                        fillRule="evenodd"
+                        d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z"
+                        clipRule="evenodd"
+                      />
+                    </svg>
+                  )}
+                </button>
+                {chatMode === "voice" ? (
+                  <div className="flex flex-1 justify-center">
+                    <MicButton
+                      isCapturing={isCapturing}
+                      isConnected={isConnected}
+                      volume={volume}
+                      onToggle={handleMicToggle}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </Panel>
+        </Group>
         {sessionEnded && (
           <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="rounded-xl bg-white p-6 shadow-xl text-center max-w-sm">
-              <h2 className="text-lg font-semibold text-gray-900 mb-2">Session Ended</h2>
-              <p className="text-sm text-gray-600 mb-4">
+            <div className="rounded-xl bg-surface-primary p-6 shadow-overlay text-center max-w-sm">
+              <h2 className="text-lg font-semibold text-text-primary mb-2">
+                Session Ended
+              </h2>
+              <p className="text-sm text-text-secondary mb-4">
                 The connection was lost. Your chat history is preserved.
               </p>
               <button
-                onClick={() => { setSessionEnded(false); connect(); }}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                onClick={() => {
+                  setSessionEnded(false);
+                  connect();
+                }}
+                className="rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover"
               >
                 Start New Session
               </button>

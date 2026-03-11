@@ -33,7 +33,7 @@ function ConnectionBadge({ status }: ConnectionBadgeProps): React.ReactElement {
           className={`relative inline-flex h-2.5 w-2.5 rounded-full ${config.color}`}
         />
       </span>
-      <span className="text-xs text-gray-500">{config.label}</span>
+      <span className="text-xs text-text-secondary">{config.label}</span>
     </div>
   );
 }

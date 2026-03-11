@@ -157,9 +157,7 @@ export async function searchItems(
   );
 }
 
-export async function fetchItemDetails(
-  itemKey: string,
-): Promise<ZoteroItem> {
+export async function fetchItemDetails(itemKey: string): Promise<ZoteroItem> {
   return zoteroFetch<ZoteroItem>(`/users/0/items/${itemKey}`);
 }
 

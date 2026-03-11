@@ -44,17 +44,20 @@ export function useZoteroHealth(): UseZoteroHealthReturn {
           libraryEmpty: false,
         }));
 
-    const checkPlugin: Promise<{ pluginInstalled: boolean }> =
-      fetch("/zotero-plugin/colloquia/ping")
-        .then((res: Response) => {
-          if (!res.ok) {
-            throw new Error(`Plugin endpoint responded with status ${res.status}`);
-          }
-          return { pluginInstalled: true };
-        })
-        .catch(() => ({
-          pluginInstalled: false,
-        }));
+    const checkPlugin: Promise<{ pluginInstalled: boolean }> = fetch(
+      "/zotero-plugin/colloquia/ping",
+    )
+      .then((res: Response) => {
+        if (!res.ok) {
+          throw new Error(
+            `Plugin endpoint responded with status ${res.status}`,
+          );
+        }
+        return { pluginInstalled: true };
+      })
+      .catch(() => ({
+        pluginInstalled: false,
+      }));
 
     Promise.allSettled([checkLibrary, checkPlugin])
       .then(
@@ -62,7 +65,7 @@ export function useZoteroHealth(): UseZoteroHealthReturn {
           results: [
             PromiseSettledResult<{ available: boolean; libraryEmpty: boolean }>,
             PromiseSettledResult<{ pluginInstalled: boolean }>,
-          ]
+          ],
         ) => {
           const libraryResult: { available: boolean; libraryEmpty: boolean } =
             results[0].status === "fulfilled"
@@ -81,7 +84,7 @@ export function useZoteroHealth(): UseZoteroHealthReturn {
             loading: false,
             error: null,
           });
-        }
+        },
       )
       .catch((err: unknown) => {
         const message: string =
@@ -96,8 +99,9 @@ export function useZoteroHealth(): UseZoteroHealthReturn {
       });
   }, []);
 
-  useEffect((): void => {
-    check();
+  useEffect(() => {
+    // Wrap in microtask to avoid synchronous setState in effect body
+    void Promise.resolve().then(check);
   }, [check]);
 
   return { state, refresh: check };

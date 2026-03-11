@@ -21,11 +21,11 @@ export const registeredWorklets: Map<
  */
 export function createWorkletFromSrc(
   workletName: string,
-  workletSrc: string
+  workletSrc: string,
 ): string {
   const script: Blob = new Blob(
     [`registerProcessor("${workletName}", ${workletSrc})`],
-    { type: "application/javascript" }
+    { type: "application/javascript" },
   );
   return URL.createObjectURL(script);
 }

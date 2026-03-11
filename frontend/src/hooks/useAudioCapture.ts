@@ -75,12 +75,12 @@ export function useAudioCapture({
       const recWorkletName: string = "audio-recorder-worklet";
       const recSrc: string = createWorkletFromSrc(
         recWorkletName,
-        AudioRecordingWorklet
+        AudioRecordingWorklet,
       );
       await ctx.audioWorklet.addModule(recSrc);
       const recordingWorklet: AudioWorkletNode = new AudioWorkletNode(
         ctx,
-        recWorkletName
+        recWorkletName,
       );
       recordingWorkletRef.current = recordingWorklet;
 
@@ -97,11 +97,14 @@ export function useAudioCapture({
 
       // Volume meter worklet
       const vuWorkletName: string = "vu-meter";
-      const vuSrc: string = createWorkletFromSrc(vuWorkletName, VolMeterWorklet);
+      const vuSrc: string = createWorkletFromSrc(
+        vuWorkletName,
+        VolMeterWorklet,
+      );
       await ctx.audioWorklet.addModule(vuSrc);
       const vuWorklet: AudioWorkletNode = new AudioWorkletNode(
         ctx,
-        vuWorkletName
+        vuWorkletName,
       );
       vuWorkletRef.current = vuWorklet;
 

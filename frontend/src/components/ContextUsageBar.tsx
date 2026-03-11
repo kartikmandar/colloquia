@@ -7,10 +7,18 @@ interface ContextUsageBarProps {
   maxTokens: number;
 }
 
-function ContextUsageBar({ totalTokens, maxTokens }: ContextUsageBarProps): React.ReactElement {
-  const percentage: number = maxTokens > 0 ? Math.min((totalTokens / maxTokens) * 100, 100) : 0;
-  const displayTotal: string = totalTokens >= 1000 ? `${Math.round(totalTokens / 1000)}K` : String(totalTokens);
-  const displayMax: string = maxTokens >= 1000 ? `${Math.round(maxTokens / 1000)}K` : String(maxTokens);
+function ContextUsageBar({
+  totalTokens,
+  maxTokens,
+}: ContextUsageBarProps): React.ReactElement {
+  const percentage: number =
+    maxTokens > 0 ? Math.min((totalTokens / maxTokens) * 100, 100) : 0;
+  const displayTotal: string =
+    totalTokens >= 1000
+      ? `${Math.round(totalTokens / 1000)}K`
+      : String(totalTokens);
+  const displayMax: string =
+    maxTokens >= 1000 ? `${Math.round(maxTokens / 1000)}K` : String(maxTokens);
 
   let colorClass: string;
   if (percentage > 85) {
@@ -22,14 +30,17 @@ function ContextUsageBar({ totalTokens, maxTokens }: ContextUsageBarProps): Reac
   }
 
   return (
-    <div className="flex items-center gap-1.5" title={`${displayTotal} / ${displayMax} tokens`}>
-      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-gray-200">
+    <div
+      className="flex items-center gap-1.5"
+      title={`${displayTotal} / ${displayMax} tokens`}
+    >
+      <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-tertiary">
         <div
           className={`h-full rounded-full transition-all ${colorClass}`}
           style={{ width: `${percentage}%` }}
         />
       </div>
-      <span className="text-[10px] font-mono text-gray-400">
+      <span className="text-xs font-mono text-text-tertiary">
         {displayTotal}/{displayMax}
       </span>
     </div>

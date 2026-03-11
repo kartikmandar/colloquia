@@ -17,9 +17,15 @@ function formatRelativeTime(timestamp: number): string {
   return new Date(timestamp).toLocaleDateString();
 }
 
-function shouldGroup(current: ChatMessage, previous: ChatMessage | undefined): boolean {
+function shouldGroup(
+  current: ChatMessage,
+  previous: ChatMessage | undefined,
+): boolean {
   if (!previous) return false;
-  return current.role === previous.role && current.timestamp - previous.timestamp < 60000;
+  return (
+    current.role === previous.role &&
+    current.timestamp - previous.timestamp < 60000
+  );
 }
 
 interface ChatPanelProps {
@@ -61,7 +67,7 @@ function ChatPanel({
         className="flex-1 overflow-y-auto px-4 py-3 space-y-2"
       >
         {messages.length === 0 && (
-          <div className="flex h-full items-center justify-center text-sm text-gray-400">
+          <div className="flex h-full items-center justify-center text-sm text-text-tertiary">
             Start a conversation using voice or text
           </div>
         )}
@@ -75,15 +81,15 @@ function ChatPanel({
               <div
                 className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
                   msg.role === "user"
-                    ? "bg-blue-600 text-white"
-                    : "bg-gray-100 text-gray-900"
+                    ? "bg-accent-primary text-white"
+                    : "bg-surface-tertiary text-text-primary"
                 }`}
               >
                 {!grouped && (
                   <div className="flex items-center gap-1.5 mb-0.5">
                     {msg.mode === "voice" ? (
                       <svg
-                        className={`h-3 w-3 ${msg.role === "user" ? "text-blue-200" : "text-gray-400"}`}
+                        className={`h-3 w-3 ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
                         viewBox="0 0 20 20"
                         fill="currentColor"
                       >
@@ -95,7 +101,7 @@ function ChatPanel({
                       </svg>
                     ) : (
                       <svg
-                        className={`h-3 w-3 ${msg.role === "user" ? "text-blue-200" : "text-gray-400"}`}
+                        className={`h-3 w-3 ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
                         viewBox="0 0 20 20"
                         fill="currentColor"
                       >
@@ -107,83 +113,88 @@ function ChatPanel({
                       </svg>
                     )}
                     <span
-                      className={`text-[10px] font-medium ${msg.role === "user" ? "text-blue-200" : "text-gray-400"}`}
+                      className={`text-xs font-medium ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
                     >
                       {msg.role === "user" ? "You" : "Colloquia"}
                     </span>
                     {msg.model && msg.role === "model" && (
-                      <span className="text-[9px] font-mono text-gray-300">
+                      <span className="text-xs font-mono text-text-tertiary">
                         {msg.model}
                       </span>
                     )}
-                    <span className={`ml-auto text-[9px] ${msg.role === "user" ? "text-blue-200" : "text-gray-300"}`}>
+                    <span
+                      className={`ml-auto text-xs ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
+                    >
                       {formatRelativeTime(msg.timestamp)}
                     </span>
                   </div>
                 )}
-              {msg.isStreaming && !msg.text ? (
-                <span className="inline-flex items-center gap-1 text-gray-400">
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.3s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400 [animation-delay:-0.15s]" />
-                  <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-gray-400" />
-                </span>
-              ) : (
-                <p className="whitespace-pre-wrap">{msg.text}</p>
-              )}
-              {/* Thinking trace */}
-              {msg.thinking && (
-                <ThinkingStep
-                  content={msg.thinking.content}
-                  durationMs={msg.thinking.durationMs}
-                />
-              )}
-              {/* Tool calls (collapsed/expandable) */}
-              {msg.toolCalls && msg.toolCalls.length > 0 && (
-                <div className="mt-1.5 space-y-1">
-                  {msg.toolCalls.map((tc, idx: number) => (
-                    <ToolCallBadge
-                      key={idx}
-                      toolName={tc.toolName}
-                      status={tc.status}
-                      durationMs={tc.durationMs}
-                      input={tc.input}
-                      output={tc.output}
-                      error={tc.error}
-                    />
-                  ))}
-                </div>
-              )}
+                {msg.isStreaming && !msg.text ? (
+                  <span className="inline-flex items-center gap-1 text-text-tertiary">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary [animation-delay:-0.3s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary [animation-delay:-0.15s]" />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary" />
+                  </span>
+                ) : (
+                  <p className="whitespace-pre-wrap">{msg.text}</p>
+                )}
+                {/* Thinking trace */}
+                {msg.thinking && (
+                  <ThinkingStep
+                    content={msg.thinking.content}
+                    durationMs={msg.thinking.durationMs}
+                  />
+                )}
+                {/* Tool calls (collapsed/expandable) */}
+                {msg.toolCalls && msg.toolCalls.length > 0 && (
+                  <div className="mt-1.5 space-y-1">
+                    {msg.toolCalls.map((tc, idx: number) => (
+                      <ToolCallBadge
+                        key={idx}
+                        toolName={tc.toolName}
+                        status={tc.status}
+                        durationMs={tc.durationMs}
+                        input={tc.input}
+                        output={tc.output}
+                        error={tc.error}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
           );
         })}
       </div>
 
       {/* Text input */}
       {showTextInput && (
-      <form onSubmit={handleSubmit} className="border-t border-gray-200 p-3">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={inputText}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-              setInputText(e.target.value)
-            }
-            placeholder={
-              isConnected ? "Type a message..." : "Connect to start chatting"
-            }
-            disabled={!isConnected}
-            className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
-          />
-          <button
-            type="submit"
-            disabled={!isConnected || !inputText.trim()}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
-          >
-            Send
-          </button>
-        </div>
-      </form>
+        <form
+          onSubmit={handleSubmit}
+          className="border-t border-border-primary p-3"
+        >
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={inputText}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
+                setInputText(e.target.value)
+              }
+              placeholder={
+                isConnected ? "Type a message..." : "Connect to start chatting"
+              }
+              disabled={!isConnected}
+              className="flex-1 rounded-lg border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent-primary focus:ring-1 focus:ring-accent-primary disabled:bg-surface-tertiary disabled:text-text-tertiary"
+            />
+            <button
+              type="submit"
+              disabled={!isConnected || !inputText.trim()}
+              className="rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover disabled:bg-surface-tertiary disabled:text-text-tertiary disabled:cursor-not-allowed"
+            >
+              Send
+            </button>
+          </div>
+        </form>
       )}
     </div>
   );
