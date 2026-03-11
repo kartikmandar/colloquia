@@ -280,7 +280,11 @@ class SearchLibraryEndpoint {
   ): Promise<[number, string, string]> {
     try {
       const body = parseBody(request.data);
-      const { query, tag, collection, author, dateRange, limit, fields } = body;
+      const {
+        query, tag, collection, author, dateRange,
+        year, itemType, limit, offset,
+        sort, sortDirection,
+      } = body;
 
       const s = new Zotero.Search();
       (s as any).libraryID = Zotero.Libraries.userLibraryID;
@@ -295,13 +299,45 @@ class SearchLibraryEndpoint {
       }
 
       if (collection) {
-        s.addCondition("collection", "is", collection);
+        // If collection doesn't look like a key (8 uppercase alphanumeric chars),
+        // try to resolve it as a collection name
+        let collectionKey: string = collection;
+        if (!/^[A-Z0-9]{8}$/.test(collection)) {
+          const allCollections = Zotero.Collections.getByLibrary(
+            Zotero.Libraries.userLibraryID,
+          );
+          const match = allCollections.find(
+            (c: any) => c.name.toLowerCase() === collection.toLowerCase(),
+          );
+          if (match) {
+            collectionKey = match.key;
+          }
+        }
+        s.addCondition("collection", "is", collectionKey);
       }
 
       if (author) {
         s.addCondition("creator", "contains", author);
       }
 
+      // Year filter: "2023" or "2020-2024"
+      if (year) {
+        const yearStr: string = String(year);
+        if (yearStr.includes("-")) {
+          const [startYear, endYear] = yearStr.split("-").map((y: string) => y.trim());
+          if (startYear) {
+            s.addCondition("date", "isAfter", `${startYear}-01-01`);
+          }
+          if (endYear) {
+            s.addCondition("date", "isBefore", `${endYear}-12-31`);
+          }
+        } else {
+          s.addCondition("date", "isAfter", `${yearStr}-01-01`);
+          s.addCondition("date", "isBefore", `${yearStr}-12-31`);
+        }
+      }
+
+      // Legacy dateRange support
       if (dateRange) {
         if (dateRange.start) {
           s.addCondition("date", "isAfter", dateRange.start);
@@ -311,8 +347,13 @@ class SearchLibraryEndpoint {
         }
       }
 
+      // Item type filter
+      if (itemType) {
+        s.addCondition("itemType", "is", itemType);
+      }
+
       // If no conditions were added, get all items
-      if (!query && !tag && !collection && !author && !dateRange) {
+      if (!query && !tag && !collection && !author && !dateRange && !year && !itemType) {
         s.addCondition("itemType", "isNot", "attachment");
         s.addCondition("itemType", "isNot", "note");
       }
@@ -321,10 +362,9 @@ class SearchLibraryEndpoint {
       const items = await Zotero.Items.getAsync(ids);
 
       const maxResults: number = Math.min(Math.max(limit || 50, 1), 50);
-      // Determine which fields to include (default: all)
-      const requestedFields: string[] | null =
-        Array.isArray(fields) && fields.length > 0 ? fields : null;
+      const startOffset: number = Math.max(offset || 0, 0);
 
+      // Always return all fields — backend post-processing handles compacting
       const allFields: Record<string, (item: any) => any> = {
         key: (item: any) => item.key,
         itemType: (item: any) => item.itemType,
@@ -342,29 +382,156 @@ class SearchLibraryEndpoint {
         tags: (item: any) => item.getTags().map((t: any) => t.tag),
       };
 
-      const activeFields: string[] = requestedFields
-        ? requestedFields.filter((f: string) => f in allFields)
-        : Object.keys(allFields);
-
-      const regularItems = items.filter((item: any) => item.isRegularItem());
+      let regularItems = items.filter((item: any) => item.isRegularItem());
       const totalResults: number = regularItems.length;
 
-      const results = regularItems
-        .slice(0, maxResults)
-        .map((item: any) => {
-          const obj: Record<string, any> = {};
-          for (const field of activeFields) {
-            obj[field] = allFields[field](item);
+      // Sort if requested
+      if (sort) {
+        const dir: number = sortDirection === "asc" ? 1 : -1;
+        const sortField: string = sort;
+        regularItems.sort((a: any, b: any) => {
+          let valA: string = "";
+          let valB: string = "";
+          try {
+            if (sortField === "title" || sortField === "date" || sortField === "dateAdded" || sortField === "dateModified") {
+              valA = String(a.getField(sortField) || "");
+              valB = String(b.getField(sortField) || "");
+            }
+          } catch {
+            // Field not available, leave as empty
           }
-          return obj;
+          return valA.localeCompare(valB) * dir;
         });
+      }
+
+      // Apply offset and limit
+      const sliced = regularItems.slice(startOffset, startOffset + maxResults);
+
+      const results = sliced.map((item: any) => {
+        const obj: Record<string, any> = {};
+        for (const field of Object.keys(allFields)) {
+          obj[field] = allFields[field](item);
+        }
+        return obj;
+      });
 
       return jsonResponse(200, {
         totalResults,
+        returnedCount: results.length,
+        offset: startOffset,
+        hasMore: startOffset + results.length < totalResults,
         items: results,
       });
     } catch (e: any) {
       ztoolkit.log(`searchLibrary error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/getItem
+// ---------------------------------------------------------------------------
+
+class GetItemEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body = parseBody(request.data);
+      const { itemKey } = body;
+
+      if (!itemKey) {
+        return jsonResponse(400, {
+          error: "Missing required field: itemKey",
+        });
+      }
+
+      const libID = Zotero.Libraries.userLibraryID;
+      const item = await Zotero.Items.getByLibraryAndKeyAsync(libID, itemKey);
+
+      if (!item) {
+        return jsonResponse(404, { error: `Item not found: ${itemKey}` });
+      }
+
+      // Build full metadata
+      const metadata: Record<string, any> = {
+        key: item.key,
+        itemType: item.itemType,
+        title: item.getField("title"),
+        creators: item.getCreators().map((c: any) => ({
+          firstName: c.firstName || "",
+          lastName: c.lastName || "",
+          creatorType: c.creatorType || "author",
+        })),
+        date: item.getField("date"),
+        year: item.getField("year"),
+        DOI: item.getField("DOI"),
+        abstractNote: item.getField("abstractNote"),
+        publicationTitle: item.getField("publicationTitle"),
+        url: item.getField("url"),
+        tags: item.getTags().map((t: any) => t.tag),
+      };
+
+      // Child item counts
+      let noteCount = 0;
+      let attachmentCount = 0;
+      let annotationCount = 0;
+
+      const noteIDs = item.getNotes();
+      noteCount = noteIDs.length;
+
+      const attachmentIDs = item.getAttachments();
+      attachmentCount = attachmentIDs.length;
+
+      // Count annotations across PDF attachments
+      if (attachmentIDs.length > 0) {
+        const attachments = await Zotero.Items.getAsync(attachmentIDs);
+        for (const att of attachments) {
+          if ((att as any).attachmentContentType === "application/pdf") {
+            try {
+              const annotations = (att as any).getAnnotations();
+              annotationCount += annotations.length;
+            } catch {
+              // getAnnotations may not be available
+            }
+          }
+        }
+      }
+
+      metadata.noteCount = noteCount;
+      metadata.attachmentCount = attachmentCount;
+      metadata.annotationCount = annotationCount;
+
+      // Collections
+      try {
+        const collectionIDs: number[] = item.getCollections();
+        const collections: Array<{ key: string; name: string }> = [];
+        for (const colID of collectionIDs) {
+          const col = Zotero.Collections.get(colID);
+          if (col) {
+            collections.push({ key: col.key, name: col.name });
+          }
+        }
+        metadata.collections = collections;
+      } catch {
+        metadata.collections = [];
+      }
+
+      // Related items
+      try {
+        metadata.relatedItemKeys = item.relatedItems || [];
+      } catch {
+        metadata.relatedItemKeys = [];
+      }
+
+      return jsonResponse(200, metadata);
+    } catch (e: any) {
+      ztoolkit.log(`getItem error: ${e.message}`);
       return jsonResponse(500, { error: e.message });
     }
   }
@@ -1135,6 +1302,7 @@ export function registerEndpoints(): void {
     "/colloquia/removeFromCollection": RemoveFromCollectionEndpoint,
     "/colloquia/getAnnotations": GetAnnotationsEndpoint,
     "/colloquia/trashItems": TrashItemsEndpoint,
+    "/colloquia/getItem": GetItemEndpoint,
   };
 
   for (const [path, EndpointClass] of Object.entries(endpoints)) {

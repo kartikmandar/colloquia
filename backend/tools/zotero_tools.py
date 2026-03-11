@@ -92,23 +92,35 @@ def create_zotero_tools(
 
     async def search_zotero_library(
         query: str = "", tag: str = "", collection: str = "", author: str = "",
-        limit: int = 20, fields: str = "key,title,creators,year,abstractNote",
+        year: str = "", itemType: str = "",
+        limit: int = 20, offset: int = 0,
+        detail: str = "minimal",
+        maxAuthors: int = 0, maxAbstractChars: int = 0, maxTags: int = 0,
+        sort: str = "", sortDirection: str = "desc",
     ) -> dict[str, Any]:
         """Search the user's Zotero library for papers by title, author, tag, or collection.
 
-        Choose `limit` and `fields` to fetch only what you need for the user's question.
-        For broad browsing questions (e.g. "what's in my library?"), use a small field set
-        like "title,creators,year" and a reasonable limit. For detailed lookups, include
-        more fields. Always request the minimum data needed to answer the question.
+        Uses detail levels to control how much data is returned, reducing context pollution.
+        Start with detail="minimal" and only upgrade when the user needs more data.
 
         Args:
             query: Search text matching title, creator, or year. Pass empty string to skip.
             tag: Filter by tag name. Pass empty string to skip.
-            collection: Filter by collection key. Pass empty string to skip.
+            collection: Filter by collection key or name (case-insensitive). Pass empty string to skip.
             author: Filter by author name. Pass empty string to skip.
-            limit: Maximum number of items to return (1-50). Use a small number for overview questions, larger for exhaustive searches.
-            fields: Comma-separated list of fields to include per item. Available fields: key, itemType, title, creators, date, year, DOI, abstractNote, publicationTitle, tags. Always include 'key'. Use fewer fields for broad queries.
+            year: Filter by year: "2023" (single year) or "2020-2024" (range). Pass empty string to skip.
+            itemType: Filter by item type (e.g. "journalArticle", "conferencePaper"). Pass empty string to skip.
+            limit: Maximum number of items to return (1-50).
+            offset: Number of items to skip for pagination.
+            detail: Data detail level: "minimal" (title+year+3 authors), "standard" (adds abstract snippet, DOI), "full" (everything). Default "minimal".
+            maxAuthors: Override max authors per item (0=use detail default, positive=cap, -1=all).
+            maxAbstractChars: Override abstract truncation (0=use detail default, positive=char limit, -1=full).
+            maxTags: Override max tags per item (0=use detail default, positive=cap, -1=all).
+            sort: Sort field: "date", "title", "dateAdded", "dateModified". Pass empty string for default order.
+            sortDirection: Sort direction: "asc" or "desc". Default "desc".
         """
+        from tools.result_processing import compact_search_results
+
         # Strip wildcards/whitespace so Gemini sending "*" or " " is treated
         # the same as an empty string (i.e. no filter applied).
         def _clean(val: str) -> str:
@@ -123,11 +135,30 @@ def create_zotero_tools(
             params["collection"] = _clean(collection)
         if _clean(author):
             params["author"] = _clean(author)
+        if _clean(year):
+            params["year"] = _clean(year)
+        if _clean(itemType):
+            params["itemType"] = _clean(itemType)
         params["limit"] = max(1, min(limit, 50))
-        requested_fields: list[str] = [f.strip() for f in fields.split(",") if f.strip()]
-        if requested_fields:
-            params["fields"] = requested_fields
-        return await _delegate_to_frontend(ws, "searchLibrary", params, ctx)
+        params["offset"] = max(0, offset)
+        if _clean(sort):
+            params["sort"] = _clean(sort)
+            params["sortDirection"] = sortDirection if sortDirection in ("asc", "desc") else "desc"
+
+        # Always request all fields from plugin; backend post-processing compacts
+        raw_result: dict[str, Any] = await _delegate_to_frontend(ws, "searchLibrary", params, ctx)
+
+        # Validate detail level
+        valid_details: list[str] = ["minimal", "standard", "full"]
+        effective_detail: str = detail if detail in valid_details else "minimal"
+
+        return compact_search_results(
+            raw_result,
+            detail=effective_detail,
+            maxAuthors=maxAuthors,
+            maxAbstractChars=maxAbstractChars,
+            maxTags=maxTags,
+        )
 
     async def create_note(parentItemKey: str, noteContent: str, tags: str) -> dict[str, Any]:
         """Create a note attached to a paper in Zotero.
@@ -293,8 +324,21 @@ def create_zotero_tools(
             params["collectionKey"] = collectionKey
         return await _delegate_to_frontend(ws, "addPaper", params, ctx)
 
+    async def get_item_details(itemKey: str) -> dict[str, Any]:
+        """Get complete metadata for a specific Zotero item by its key.
+
+        Use this after search_zotero_library to get full details about a paper
+        the user is interested in. Returns all metadata fields, child item counts,
+        collections, and related items.
+
+        Args:
+            itemKey: The Zotero item key (e.g., from a previous search result).
+        """
+        return await _delegate_to_frontend(ws, "getItem", {"itemKey": itemKey}, ctx)
+
     return [
         search_zotero_library,
+        get_item_details,
         create_note,
         manage_tags,
         link_related_items,

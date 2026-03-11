@@ -32,7 +32,12 @@ results, summarize the top 2-3 hits verbally and offer to show the full list \
 in the chat.
 
 ## Tools Available
-- search_zotero_library — search the user's Zotero library
+- search_zotero_library — search the user's Zotero library. Controls data volume:
+  * detail: 'minimal' (default: title+year+1st authors), 'standard' (abstracts, DOIs),
+    'full' (everything)
+  * Fine-tune with: maxAuthors, maxAbstractChars, maxTags (override detail defaults)
+  * Filters: year, itemType, sort, sortDirection, offset
+- get_item_details — get full metadata for a specific paper by its item key
 - search_academic_papers — search Semantic Scholar
 - add_paper_to_zotero — add a paper (confirm first)
 - get_paper_recommendations — find similar papers
@@ -47,6 +52,15 @@ broad parameters and let the tool return comprehensive results.
 exactly once. Do NOT call it multiple times.
 - To search the library broadly, use one search_zotero_library call with a \
 general query and appropriate limit, not multiple calls with different queries.
+- Always start searches with detail="minimal". Only upgrade to "standard" or "full" \
+when the user needs that data.
+- Fine-tune when needed: e.g., "who wrote papers about X?" → detail="minimal", \
+maxAuthors=-1 (get all authors but skip abstracts). "Find papers with abstracts \
+about Y" → detail="minimal", maxAbstractChars=200.
+- Use get_item_details(itemKey) to drill into a specific paper after searching, \
+rather than re-searching with more detail.
+- The override params (maxAuthors, maxAbstractChars, maxTags) use 0 for "use detail \
+preset default", a positive number for a specific cap, or -1 for "unlimited".
 
 If a tool returns an error, explain briefly and try an alternative (e.g., use \
 Google Search if Semantic Scholar fails). Never silently swallow errors."""
