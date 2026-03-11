@@ -60,10 +60,12 @@ interface UseWebSocketReturn {
   activeUrl: string;
   modelList: ModelListMessage | null;
   isModelSwitching: boolean;
+  isTextGenerating: boolean;
   connect: () => void;
   disconnect: () => void;
   sendAudio: (base64Pcm: string) => void;
   sendText: (content: string) => void;
+  stopTextGeneration: () => void;
   sendPaperContext: (payload: Record<string, unknown>) => void;
   sendControl: (action: string, mode?: string) => void;
   sendModelSwitch: (modelId: string, mode: "voice" | "text") => void;
@@ -642,6 +644,23 @@ export function useWebSocket({
     [sendRaw, addMessage],
   );
 
+  const stopTextGeneration = useCallback((): void => {
+    sendRaw({ type: "stop_text_generation" });
+    // Immediately mark the streaming message as done on frontend
+    setMessages((prev: ChatMessage[]) => {
+      const updated: ChatMessage[] = [...prev];
+      const last: ChatMessage | undefined = updated[updated.length - 1];
+      if (last && last.role === "model" && last.isStreaming) {
+        updated[updated.length - 1] = { ...last, isStreaming: false };
+      }
+      return updated;
+    });
+  }, [sendRaw]);
+
+  const isTextGenerating: boolean = messages.some(
+    (m: ChatMessage) => m.role === "model" && m.isStreaming === true,
+  );
+
   const sendPaperContext = useCallback(
     (payload: Record<string, unknown>): void => {
       sendRaw({ type: "paper_context", ...payload });
@@ -722,10 +741,12 @@ export function useWebSocket({
     activeUrl,
     modelList,
     isModelSwitching,
+    isTextGenerating,
     connect,
     disconnect,
     sendAudio,
     sendText,
+    stopTextGeneration,
     sendPaperContext,
     sendControl,
     sendModelSwitch,

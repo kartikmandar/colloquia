@@ -89,6 +89,8 @@ function MainApp({
     sendControl,
     modelList,
     isModelSwitching,
+    stopTextGeneration,
+    isTextGenerating,
     sendModelSwitch,
   } = useWebSocket({
     url: wsUrl,
@@ -327,7 +329,9 @@ function MainApp({
                 <ChatPanel
                   messages={messages}
                   onSendText={sendText}
+                  onStopGeneration={stopTextGeneration}
                   isConnected={isConnected}
+                  isTextGenerating={isTextGenerating}
                   showTextInput={chatMode === "text"}
                 />
               </div>

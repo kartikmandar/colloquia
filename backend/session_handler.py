@@ -126,17 +126,25 @@ async def run_session(
 
                         elif msg_type == "text":
                             text_content: str = raw.get("content", "")
+                            # Cancel any in-progress text generation
+                            if bundle.text_generation_task and not bundle.text_generation_task.done():
+                                bundle.text_generation_task.cancel()
                             # Run as task so the receive loop stays free to
                             # process zotero_action_result messages (avoids
                             # deadlock when tools delegate to frontend).
-                            asyncio.create_task(handle_text_message(
-                                ws, bundle, text_content, api_key
-                            ))
+                            bundle.text_generation_task = asyncio.create_task(
+                                handle_text_message(ws, bundle, text_content, api_key)
+                            )
 
                         elif msg_type == "paper_context":
                             await handle_paper_load(
                                 ws, live_queue, raw, bundle
                             )
+
+                        elif msg_type == "stop_text_generation":
+                            if bundle.text_generation_task and not bundle.text_generation_task.done():
+                                bundle.text_generation_task.cancel()
+                                logger.info("Text generation cancelled by user")
 
                         elif msg_type == "zotero_action_result":
                             resolve_zotero_result(raw, zotero_ctx)
@@ -585,6 +593,8 @@ async def handle_text_message(
     await ws.send_json({"type": "text_response_start"})
 
     async with bundle.text_chat_lock:
+        used_model: str = ""
+        context_contents: list[Any] = []
         try:
             client: genai.Client = genai.Client(
                 api_key=api_key,
@@ -630,14 +640,14 @@ async def handle_text_message(
             )
 
             # Seed from persistent history + new message
-            context_contents: list[Any] = list(bundle.text_chat_history) + [new_user_msg]
+            context_contents = list(bundle.text_chat_history) + [new_user_msg]
 
             # Cap history to avoid exceeding context window
             if len(context_contents) > MAX_HISTORY_TURNS:
                 context_contents = context_contents[-MAX_HISTORY_TURNS:]
 
             full_text: str = ""
-            used_model: str = bundle.current_text_model
+            used_model = bundle.current_text_model
             max_tool_turns: int = 5
             # Track executed tool calls across all turns to prevent re-execution
             executed_tool_keys: set[str] = set()
@@ -836,6 +846,20 @@ async def handle_text_message(
                 "type": "text_response_done",
                 "model": used_model,
             })
+
+        except asyncio.CancelledError:
+            logger.info("Text generation cancelled")
+            try:
+                await ws.send_json({
+                    "type": "text_response_done",
+                    "model": used_model,
+                    "cancelled": True,
+                })
+            except Exception:
+                pass
+            # Still save partial history so context isn't lost
+            if context_contents:
+                bundle.text_chat_history = context_contents
 
         except Exception as e:
             logger.error("Text message handling failed: %s", str(e))

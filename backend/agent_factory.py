@@ -36,6 +36,7 @@ class SessionBundle:
     zotero_ctx: ZoteroToolContext
     text_chat_history: list[Any] = field(default_factory=list)
     text_chat_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    text_generation_task: asyncio.Task[None] | None = None
     # Mutable model tracking
     current_voice_model: str = LIVE_MODEL
     current_text_model: str = ""

@@ -34,14 +34,18 @@ function shouldGroup(
 interface ChatPanelProps {
   messages: ChatMessage[];
   onSendText: (text: string) => void;
+  onStopGeneration: () => void;
   isConnected: boolean;
+  isTextGenerating?: boolean;
   showTextInput?: boolean;
 }
 
 function ChatPanel({
   messages,
   onSendText,
+  onStopGeneration,
   isConnected,
+  isTextGenerating = false,
   showTextInput = true,
 }: ChatPanelProps): React.ReactElement {
   const [inputText, setInputText] = useState<string>("");
@@ -204,13 +208,23 @@ function ChatPanel({
               disabled={!isConnected}
               className="flex-1 rounded-lg border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent-primary focus:ring-1 focus:ring-accent-primary disabled:bg-surface-tertiary disabled:text-text-tertiary"
             />
-            <button
-              type="submit"
-              disabled={!isConnected || !inputText.trim()}
-              className="rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover disabled:bg-surface-tertiary disabled:text-text-tertiary disabled:cursor-not-allowed"
-            >
-              Send
-            </button>
+            {isTextGenerating ? (
+              <button
+                type="button"
+                onClick={onStopGeneration}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!isConnected || !inputText.trim()}
+                className="rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover disabled:bg-surface-tertiary disabled:text-text-tertiary disabled:cursor-not-allowed"
+              >
+                Send
+              </button>
+            )}
           </div>
         </form>
       )}
