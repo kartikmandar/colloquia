@@ -7,6 +7,8 @@ import type { ChatMessage } from "../hooks/useWebSocket";
 import ToolCallBadge from "./ToolCallBadge";
 import ThinkingStep from "./ThinkingStep";
 import MarkdownRenderer from "./MarkdownRenderer";
+import MediaRenderer, { ImageLightbox } from "./MediaRenderer";
+import type { MediaPart } from "./MediaRenderer";
 
 function formatRelativeTime(timestamp: number): string {
   const seconds: number = Math.floor((Date.now() - timestamp) / 1000);
@@ -43,6 +45,7 @@ function ChatPanel({
   showTextInput = true,
 }: ChatPanelProps): React.ReactElement {
   const [inputText, setInputText] = useState<string>("");
+  const [expandedMedia, setExpandedMedia] = useState<MediaPart | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom on new messages
@@ -164,6 +167,18 @@ function ChatPanel({
                     ))}
                   </div>
                 )}
+                {/* Inline media (images/videos) */}
+                {msg.media && msg.media.length > 0 && (
+                  <div className="mt-2 space-y-2">
+                    {msg.media.map((m: MediaPart) => (
+                      <MediaRenderer
+                        key={m.id}
+                        media={m}
+                        onExpand={setExpandedMedia}
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           );
@@ -199,6 +214,12 @@ function ChatPanel({
           </div>
         </form>
       )}
+
+      {/* Image lightbox */}
+      <ImageLightbox
+        media={expandedMedia}
+        onClose={() => setExpandedMedia(null)}
+      />
     </div>
   );
 }

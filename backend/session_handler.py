@@ -17,6 +17,7 @@ from google.genai import types
 
 from agent_factory import SessionBundle, create_session_bundle
 from config import MAX_HISTORY_TURNS, MAX_RECONNECTS, TEXT_MODEL, TEXT_MODEL_FALLBACK
+from model_registry import MODEL_REGISTRY, get_registry_json
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
 from tools.local_tools import search_academic_papers, get_paper_recommendations
@@ -45,8 +46,13 @@ async def run_session(
     session = bundle.session
     zotero_ctx = bundle.zotero_ctx
 
+    # Send available models to frontend
+    await ws.send_json({"type": "model_list", **get_registry_json()})
+
     resumption_handle: str | None = None
     reconnect_count: int = 0
+    voice_switch_target: str | None = None
+    voice_switch_context: list[str] | None = None
 
     while reconnect_count <= MAX_RECONNECTS:
         should_reconnect: bool = False
@@ -54,6 +60,17 @@ async def run_session(
         try:
             # Create LiveRequestQueue for bidirectional audio
             live_queue: LiveRequestQueue = LiveRequestQueue()
+
+            # Inject pending voice context from a model switch
+            pending_ctx: str | None = bundle.session.state.pop("_pending_voice_context", None)
+            if pending_ctx:
+                live_queue.send_content(
+                    types.Content(
+                        role="user",
+                        parts=[types.Part(text=pending_ctx)],
+                    )
+                )
+                logger.info("Injected transcript context into new voice session")
 
             # Build run config with audio settings
             run_config: RunConfig = RunConfig(
@@ -136,6 +153,26 @@ async def run_session(
                                 # The server detects speech start/end automatically.
                                 logger.info("audio_stream_end received (auto-detection handles this)")
 
+                        elif msg_type == "model_switch":
+                            requested_model: str = raw.get("modelId", "")
+                            switch_mode: str = raw.get("mode", "")
+
+                            if switch_mode == "text":
+                                bundle.current_text_model = requested_model
+                                logger.info("Switched text model to: %s", requested_model)
+                                await ws.send_json({
+                                    "type": "model_switch_ack",
+                                    "modelId": requested_model,
+                                    "mode": "text",
+                                    "success": True,
+                                })
+
+                            elif switch_mode == "voice":
+                                nonlocal voice_switch_target, voice_switch_context
+                                voice_switch_target = requested_model
+                                voice_switch_context = raw.get("transcriptContext")
+                                live_queue.close()  # Ends run_live() gracefully
+
                 except WebSocketDisconnect:
                     logger.info("Frontend WebSocket disconnected")
                     return
@@ -153,17 +190,31 @@ async def run_session(
                     live_request_queue=live_queue,
                     run_config=run_config,
                 ):
-                    # Audio data
+                    # Audio / image / video data
                     if event.content and event.content.parts:
                         for part in event.content.parts:
                             if hasattr(part, 'inline_data') and part.inline_data and part.inline_data.data:
+                                part_mime: str = part.inline_data.mime_type or ""
                                 encoded: str = base64.b64encode(
                                     part.inline_data.data
                                 ).decode()
-                                await ws.send_json({
-                                    "type": "audio",
-                                    "data": encoded,
-                                })
+                                if part_mime.startswith("audio/"):
+                                    await ws.send_json({
+                                        "type": "audio",
+                                        "data": encoded,
+                                    })
+                                elif part_mime.startswith("image/"):
+                                    await ws.send_json({
+                                        "type": "image_response",
+                                        "data": encoded,
+                                        "mimeType": part_mime,
+                                    })
+                                elif part_mime.startswith("video/"):
+                                    await ws.send_json({
+                                        "type": "video_response",
+                                        "data": encoded,
+                                        "mimeType": part_mime,
+                                    })
                             elif hasattr(part, 'text') and part.text and event.partial:
                                 # Streaming text from model
                                 pass
@@ -286,6 +337,44 @@ async def run_session(
                 zotero_ctx.cleanup()
                 raise
 
+        # Voice model switch — rebuild agent and re-enter loop
+        if voice_switch_target:
+            target: str = voice_switch_target
+            ctx_lines: list[str] | None = voice_switch_context
+            voice_switch_target = None
+            voice_switch_context = None
+            try:
+                await bundle.rebuild_voice_agent(target)
+                runner = bundle.runner
+                await ws.send_json({
+                    "type": "model_switch_ack",
+                    "modelId": target,
+                    "mode": "voice",
+                    "success": True,
+                    "warning": "Voice context from previous model will be partially preserved via transcript summary",
+                })
+                # Inject transcript context into the new live session
+                if ctx_lines:
+                    context_text: str = (
+                        "[CONVERSATION CONTEXT FROM PREVIOUS MODEL]\n"
+                        + "\n".join(ctx_lines)
+                        + "\n[END CONTEXT — Continue the conversation naturally]"
+                    )
+                    # context_text will be injected after run_live starts;
+                    # store it so the next loop iteration picks it up
+                    bundle.session.state["_pending_voice_context"] = context_text
+            except Exception as switch_err:
+                logger.error("Voice model switch failed: %s", str(switch_err))
+                await ws.send_json({
+                    "type": "model_switch_ack",
+                    "modelId": target,
+                    "mode": "voice",
+                    "success": False,
+                    "error": str(switch_err),
+                })
+            reconnect_count = 0
+            continue
+
         if should_reconnect:
             reconnect_count += 1
             logger.info(
@@ -375,8 +464,16 @@ async def handle_paper_load(
     session.state["session_mode"] = "paper"
     session.state["paper_context"] = paper_context
 
-    # Clear text chat history on mode switch
-    bundle.text_chat_history.clear()
+    # Inject a separator into text chat history (preserve across mode switches)
+    from google import genai as _genai
+    bundle.text_chat_history.append(
+        _genai.types.Content(
+            role="user",
+            parts=[_genai.types.Part.from_text(
+                text=f"[Context switched to paper: {metadata.get('title', 'Unknown')}]"
+            )],
+        )
+    )
 
     # Inject paper content as user message via LiveRequestQueue
     context_parts: list[types.Part] = []
@@ -447,8 +544,16 @@ async def handle_switch_to_lobby(
     bundle.session.state["session_mode"] = "lobby"
     bundle.session.state["paper_context"] = {}
 
-    # Clear text chat history on mode switch
-    bundle.text_chat_history.clear()
+    # Inject a separator into text chat history (preserve across mode switches)
+    from google import genai as _genai
+    bundle.text_chat_history.append(
+        _genai.types.Content(
+            role="user",
+            parts=[_genai.types.Part.from_text(
+                text="[Returned to library browsing]"
+            )],
+        )
+    )
 
     live_queue.send_content(
         types.Content(
@@ -532,12 +637,12 @@ async def handle_text_message(
                 context_contents = context_contents[-MAX_HISTORY_TURNS:]
 
             full_text: str = ""
-            used_model: str = TEXT_MODEL
+            used_model: str = bundle.current_text_model
             max_tool_turns: int = 5
             # Track executed tool calls across all turns to prevent re-execution
             executed_tool_keys: set[str] = set()
 
-            for model_name in (TEXT_MODEL, TEXT_MODEL_FALLBACK):
+            for model_name in (bundle.current_text_model, TEXT_MODEL_FALLBACK):
                 try:
                     logger.info("Trying text model: %s", model_name)
                     used_model = model_name
@@ -576,6 +681,23 @@ async def handle_text_message(
                                         "content": part.text,
                                         "model": model_name,
                                     })
+                                elif hasattr(part, 'inline_data') and part.inline_data and part.inline_data.data:
+                                    mime: str = part.inline_data.mime_type or ""
+                                    encoded_media: str = base64.b64encode(part.inline_data.data).decode()
+                                    if mime.startswith("image/"):
+                                        await ws.send_json({
+                                            "type": "image_response",
+                                            "data": encoded_media,
+                                            "mimeType": mime,
+                                            "model": model_name,
+                                        })
+                                    elif mime.startswith("video/"):
+                                        await ws.send_json({
+                                            "type": "video_response",
+                                            "data": encoded_media,
+                                            "mimeType": mime,
+                                            "model": model_name,
+                                        })
 
                         # If no function calls, we're done
                         if not function_calls:

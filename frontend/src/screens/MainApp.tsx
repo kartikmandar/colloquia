@@ -15,6 +15,7 @@ import ConnectionBadge from "../components/ConnectionBadge";
 import ChatPanel from "../components/ChatPanel";
 import MicButton from "../components/MicButton";
 import ContextUsageBar from "../components/ContextUsageBar";
+import ModelSelector from "../components/ModelSelector";
 import ResizeHandle from "../components/ResizeHandle";
 
 interface MainAppProps {
@@ -86,6 +87,9 @@ function MainApp({
     sendText,
     sendPaperContext,
     sendControl,
+    modelList,
+    isModelSwitching,
+    sendModelSwitch,
   } = useWebSocket({
     url: wsUrl,
     onAudioData: handleAudioFromServer,
@@ -179,7 +183,7 @@ function MainApp({
         }}
       />
       {/* Top bar */}
-      <header className="flex items-center justify-between border-b border-border-primary bg-surface-primary/80 px-6 py-3 backdrop-blur-sm">
+      <header className="relative z-20 flex items-center justify-between border-b border-border-primary bg-surface-primary/80 px-6 py-3 backdrop-blur-sm">
         <img src="/logo.svg" alt="Colloquia" className="h-7" />
 
         <div className="flex items-center gap-3">
@@ -198,6 +202,13 @@ function MainApp({
               maxTokens={contextUsage.maxTokens}
             />
           )}
+          <ModelSelector
+            modelList={modelList}
+            currentMode={chatMode}
+            onSwitch={sendModelSwitch}
+            isConnected={isConnected}
+            isSwitching={isModelSwitching}
+          />
           <button
             onClick={handleConnect}
             className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -364,7 +375,7 @@ function MainApp({
                   <div className="flex flex-1 justify-center">
                     <MicButton
                       isCapturing={isCapturing}
-                      isConnected={isConnected}
+                      isConnected={isConnected && !isModelSwitching}
                       volume={volume}
                       onToggle={handleMicToggle}
                     />

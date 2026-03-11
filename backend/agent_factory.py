@@ -18,7 +18,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService, Session
 
 from agents.colloquia_agent import create_colloquia_agent
-from config import APP_NAME, LIVE_MODEL
+from config import APP_NAME, LIVE_MODEL, TEXT_MODEL
 from tools.zotero_tools import ZoteroToolContext
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -36,6 +36,30 @@ class SessionBundle:
     zotero_ctx: ZoteroToolContext
     text_chat_history: list[Any] = field(default_factory=list)
     text_chat_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    # Mutable model tracking
+    current_voice_model: str = LIVE_MODEL
+    current_text_model: str = ""
+    api_key: str = ""
+    ws: WebSocket | None = None
+
+    async def rebuild_voice_agent(self, new_model_id: str) -> None:
+        """Recreate agent and runner with a new voice model."""
+        if self.ws is None:
+            raise RuntimeError("Cannot rebuild voice agent: no WebSocket reference")
+        async with _api_key_lock:
+            os.environ["GOOGLE_API_KEY"] = self.api_key
+            model: Gemini = Gemini(model=new_model_id)
+            _ = model.api_client
+            _ = model._live_api_client
+
+        agent = create_colloquia_agent(self.ws, self.zotero_ctx, model=model)
+        self.runner = Runner(
+            agent=agent,
+            app_name=APP_NAME,
+            session_service=self.session_service,
+        )
+        self.current_voice_model = new_model_id
+        logger.info("Rebuilt voice agent with model: %s", new_model_id)
 
 
 async def create_session_bundle(
@@ -99,4 +123,8 @@ async def create_session_bundle(
         session=session,
         session_service=session_service,
         zotero_ctx=zotero_ctx,
+        current_voice_model=LIVE_MODEL,
+        current_text_model=TEXT_MODEL,
+        api_key=api_key,
+        ws=ws,
     )

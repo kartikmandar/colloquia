@@ -19,7 +19,13 @@ import type {
   ContextUsageMessage,
   SessionStatusMessage,
   ZoteroActionMessage,
+  ModelListMessage,
+  ModelSwitchAckMessage,
+  ImageResponseMessage,
+  VideoResponseMessage,
+  MediaGeneratingMessage,
 } from "../lib/protocol";
+import type { MediaPart } from "../components/MediaRenderer";
 
 export type ConnectionStatus =
   | "disconnected"
@@ -37,6 +43,7 @@ export interface ChatMessage {
   thinking?: { content: string; durationMs?: number };
   model?: string;
   isStreaming?: boolean;
+  media?: MediaPart[];
 }
 
 interface UseWebSocketOptions {
@@ -51,12 +58,15 @@ interface UseWebSocketReturn {
   messages: ChatMessage[];
   contextUsage: ContextUsageMessage | null;
   activeUrl: string;
+  modelList: ModelListMessage | null;
+  isModelSwitching: boolean;
   connect: () => void;
   disconnect: () => void;
   sendAudio: (base64Pcm: string) => void;
   sendText: (content: string) => void;
   sendPaperContext: (payload: Record<string, unknown>) => void;
   sendControl: (action: string, mode?: string) => void;
+  sendModelSwitch: (modelId: string, mode: "voice" | "text") => void;
 }
 
 let messageIdCounter: number = 0;
@@ -76,6 +86,8 @@ export function useWebSocket({
     null,
   );
   const [activeUrl, setActiveUrl] = useState<string>(url);
+  const [modelList, setModelList] = useState<ModelListMessage | null>(null);
+  const [isModelSwitching, setIsModelSwitching] = useState<boolean>(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectAttemptRef = useRef<number>(0);
@@ -166,6 +178,66 @@ export function useWebSocket({
       }
     },
     [sendZoteroActionResult],
+  );
+
+  /** Convert base64 string to Blob */
+  const base64ToBlob = useCallback(
+    (b64: string, mime: string): Blob => {
+      const binaryStr: string = atob(b64);
+      const bytes: Uint8Array = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+      return new Blob([bytes.buffer as ArrayBuffer], { type: mime });
+    },
+    [],
+  );
+
+  /** Append a MediaPart to the last model message */
+  const appendMediaToLastModel = useCallback(
+    (media: MediaPart): void => {
+      setMessages((prev: ChatMessage[]) => {
+        // Find last model message, or create one
+        let lastModelIdx: number = -1;
+        for (let i: number = prev.length - 1; i >= 0; i--) {
+          if (prev[i].role === "model") {
+            lastModelIdx = i;
+            break;
+          }
+        }
+        if (lastModelIdx === -1) {
+          // Create a new model message to hold the media
+          return [
+            ...prev,
+            {
+              id: nextMessageId(),
+              role: "model",
+              text: "",
+              mode: "text",
+              timestamp: Date.now(),
+              media: [media],
+            },
+          ];
+        }
+        return prev.map((m: ChatMessage, i: number) => {
+          if (i !== lastModelIdx) return m;
+          const existing: MediaPart[] = m.media ?? [];
+          // Replace generating placeholder if this is a real media part
+          if (!media.isGenerating && existing.length > 0) {
+            const genIdx: number = existing.findIndex(
+              (mp) => mp.isGenerating && mp.type === media.type,
+            );
+            if (genIdx !== -1) {
+              const updated: MediaPart[] = [...existing];
+              updated[genIdx] = media;
+              return { ...m, media: updated };
+            }
+          }
+          return { ...m, media: [...existing, media] };
+        });
+      });
+    },
+    [],
   );
 
   const handleMessage = useCallback(
@@ -367,6 +439,74 @@ export function useWebSocket({
           }
           break;
         }
+
+        case "model_list": {
+          const ml = data as ModelListMessage;
+          setModelList(ml);
+          break;
+        }
+
+        case "model_switch_ack": {
+          const ack = data as ModelSwitchAckMessage;
+          setIsModelSwitching(false);
+          if (ack.success) {
+            // Update the modelList's current model
+            setModelList((prev) => {
+              if (!prev) return prev;
+              if (ack.mode === "voice") {
+                return { ...prev, currentVoiceModel: ack.modelId };
+              }
+              return { ...prev, currentTextModel: ack.modelId };
+            });
+            if (ack.warning) {
+              toast(ack.warning, { duration: 5000 });
+            }
+          } else {
+            toast.error(ack.error || "Model switch failed");
+          }
+          break;
+        }
+
+        case "image_response": {
+          const img = data as ImageResponseMessage;
+          const blob: Blob = base64ToBlob(img.data, img.mimeType);
+          const objectUrl: string = URL.createObjectURL(blob);
+          const mediaPart: MediaPart = {
+            id: `media-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            type: "image",
+            mimeType: img.mimeType,
+            objectUrl,
+          };
+          appendMediaToLastModel(mediaPart);
+          break;
+        }
+
+        case "video_response": {
+          const vid = data as VideoResponseMessage;
+          const vidBlob: Blob = base64ToBlob(vid.data, vid.mimeType);
+          const vidUrl: string = URL.createObjectURL(vidBlob);
+          const vidPart: MediaPart = {
+            id: `media-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            type: "video",
+            mimeType: vid.mimeType,
+            objectUrl: vidUrl,
+          };
+          appendMediaToLastModel(vidPart);
+          break;
+        }
+
+        case "media_generating": {
+          const mg = data as MediaGeneratingMessage;
+          const placeholder: MediaPart = {
+            id: `media-gen-${Date.now()}`,
+            type: mg.mediaType,
+            mimeType: "",
+            objectUrl: "",
+            isGenerating: true,
+          };
+          appendMediaToLastModel(placeholder);
+          break;
+        }
       }
     },
     [onAudioData, onInterrupted, addMessage, handleZoteroAction],
@@ -518,6 +658,29 @@ export function useWebSocket({
     [sendRaw],
   );
 
+  const sendModelSwitch = useCallback(
+    (modelId: string, mode: "voice" | "text"): void => {
+      setIsModelSwitching(true);
+      const msg: Record<string, unknown> = {
+        type: "model_switch",
+        modelId,
+        mode,
+      };
+      // For voice switches, include recent transcript context
+      if (mode === "voice") {
+        const recentTranscripts: string[] = messages
+          .filter((m) => m.mode === "voice")
+          .slice(-10)
+          .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.text}`);
+        if (recentTranscripts.length > 0) {
+          msg.transcriptContext = recentTranscripts;
+        }
+      }
+      sendRaw(msg);
+    },
+    [sendRaw, messages],
+  );
+
   useEffect(() => {
     if (autoConnect) {
       connect();
@@ -532,16 +695,39 @@ export function useWebSocket({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Cleanup media blob URLs when messages change (revoke old ones)
+  const prevMediaUrlsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const currentUrls: Set<string> = new Set<string>();
+    for (const msg of messages) {
+      if (msg.media) {
+        for (const m of msg.media) {
+          if (m.objectUrl) currentUrls.add(m.objectUrl);
+        }
+      }
+    }
+    // Revoke URLs that are no longer in messages
+    for (const url of prevMediaUrlsRef.current) {
+      if (!currentUrls.has(url)) {
+        URL.revokeObjectURL(url);
+      }
+    }
+    prevMediaUrlsRef.current = currentUrls;
+  }, [messages]);
+
   return {
     status,
     messages,
     contextUsage,
     activeUrl,
+    modelList,
+    isModelSwitching,
     connect,
     disconnect,
     sendAudio,
     sendText,
     sendPaperContext,
     sendControl,
+    sendModelSwitch,
   };
 }
