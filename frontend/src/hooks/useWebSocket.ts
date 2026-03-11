@@ -283,14 +283,29 @@ export function useWebSocket({
             toast.error(tc.error ? `${friendlyMsg}: ${tc.error}` : friendlyMsg);
           }
           setMessages((prev: ChatMessage[]) => {
-            const updated: ChatMessage[] = [...prev];
-            const lastModel: ChatMessage | undefined = [...updated]
-              .reverse()
-              .find((m: ChatMessage) => m.role === "model");
-            if (lastModel) {
-              lastModel.toolCalls = [...(lastModel.toolCalls ?? []), tc];
+            let lastModelIdx: number = -1;
+            for (let i: number = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === "model") { lastModelIdx = i; break; }
             }
-            return updated;
+            if (lastModelIdx === -1) return prev;
+            return prev.map((m: ChatMessage, i: number) => {
+              if (i !== lastModelIdx) return m;
+              const existing: ToolCallMessage[] = m.toolCalls ?? [];
+              // If this is a status update (done/error) for an existing
+              // "calling" badge, merge into that entry instead of appending.
+              if (tc.status !== "calling") {
+                const callingIdx: number = existing.findIndex(
+                  (t: ToolCallMessage) =>
+                    t.toolName === tc.toolName && t.status === "calling",
+                );
+                if (callingIdx !== -1) {
+                  const merged: ToolCallMessage[] = [...existing];
+                  merged[callingIdx] = { ...existing[callingIdx], ...tc };
+                  return { ...m, toolCalls: merged };
+                }
+              }
+              return { ...m, toolCalls: [...existing, tc] };
+            });
           });
           break;
         }
@@ -298,17 +313,22 @@ export function useWebSocket({
         case "thinking": {
           const th: ThinkingMessage = data;
           setMessages((prev: ChatMessage[]) => {
-            const updated: ChatMessage[] = [...prev];
-            const lastModel: ChatMessage | undefined = [...updated]
-              .reverse()
-              .find((m: ChatMessage) => m.role === "model");
-            if (lastModel) {
-              lastModel.thinking = {
-                content: th.content,
-                durationMs: lastModel.thinking?.durationMs,
-              };
+            let lastModelIdx: number = -1;
+            for (let i: number = prev.length - 1; i >= 0; i--) {
+              if (prev[i].role === "model") { lastModelIdx = i; break; }
             }
-            return updated;
+            if (lastModelIdx === -1) return prev;
+            return prev.map((m: ChatMessage, i: number) =>
+              i === lastModelIdx
+                ? {
+                    ...m,
+                    thinking: {
+                      content: th.content,
+                      durationMs: m.thinking?.durationMs,
+                    },
+                  }
+                : m,
+            );
           });
           break;
         }

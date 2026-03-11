@@ -549,7 +549,6 @@ async def handle_text_message(
                         ),
                     )
 
-                    chunk_idx: int = 0
                     async for chunk in stream:
                         if not chunk.candidates:
                             continue
@@ -557,13 +556,6 @@ async def handle_text_message(
                             response_parts.append(part)
                             if part.function_call:
                                 function_calls.append(part.function_call)
-                                logger.info(
-                                    "DIAG chunk=%d fc_name=%s fc_args=%s fc_id=%s",
-                                    chunk_idx,
-                                    part.function_call.name,
-                                    dict(part.function_call.args) if part.function_call.args else {},
-                                    getattr(part.function_call, 'id', 'NO_ID'),
-                                )
                             elif part.text:
                                 turn_text += part.text
                                 full_text += part.text
@@ -572,13 +564,6 @@ async def handle_text_message(
                                     "content": part.text,
                                     "model": model_name,
                                 })
-                        chunk_idx += 1
-
-                    logger.info(
-                        "DIAG turn=%d total_function_calls=%d names=%s",
-                        _turn, len(function_calls),
-                        [fc.name for fc in function_calls],
-                    )
 
                     # If no function calls, we're done
                     if not function_calls:
@@ -610,14 +595,10 @@ async def handle_text_message(
                     # context stays consistent (one response per function_call).
                     function_response_parts: list[Any] = []
                     tool_result_cache: dict[str, dict[str, Any]] = {}
-                    for fc_idx, fc in enumerate(function_calls):
+                    for fc in function_calls:
                         fn_name: str = fc.name
                         fn_args: dict[str, Any] = dict(fc.args) if fc.args else {}
                         key: str = _dedup_key(fc)
-                        logger.info(
-                            "DIAG fc_idx=%d key=%r executed_keys=%s",
-                            fc_idx, key, executed_tool_keys,
-                        )
 
                         # If we already executed this exact call, reuse the
                         # cached result — no re-execution, no frontend badge.
