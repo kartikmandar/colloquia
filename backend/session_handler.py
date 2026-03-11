@@ -145,6 +145,8 @@ async def run_session(
             async def forward_gemini_to_user() -> None:
                 """Consume ADK events from run_live(), forward to frontend."""
                 nonlocal resumption_handle, should_reconnect
+                notified_tool_calls: set[str] = set()
+                notified_tool_responses: set[str] = set()
 
                 async for event in runner.run_live(
                     session=session,
@@ -213,25 +215,31 @@ async def run_session(
                             resumption_handle = new_handle
                             logger.info("Session resumption handle received")
 
-                    # Tool call notifications to frontend
+                    # Tool call notifications to frontend (dedup by id/name)
                     if event.content and event.content.parts:
                         for part in event.content.parts:
                             if hasattr(part, 'function_call') and part.function_call:
                                 fc = part.function_call
-                                await ws.send_json({
-                                    "type": "tool_call",
-                                    "toolName": fc.name,
-                                    "status": "calling",
-                                    "input": fc.args,
-                                })
+                                fc_id: str = getattr(fc, 'id', '') or fc.name
+                                if fc_id not in notified_tool_calls:
+                                    notified_tool_calls.add(fc_id)
+                                    await ws.send_json({
+                                        "type": "tool_call",
+                                        "toolName": fc.name,
+                                        "status": "calling",
+                                        "input": fc.args,
+                                    })
                             if hasattr(part, 'function_response') and part.function_response:
                                 fr = part.function_response
-                                await ws.send_json({
-                                    "type": "tool_call",
-                                    "toolName": fr.name,
-                                    "status": "done",
-                                    "output": fr.response,
-                                })
+                                fr_id: str = getattr(fr, 'id', '') or fr.name
+                                if fr_id not in notified_tool_responses:
+                                    notified_tool_responses.add(fr_id)
+                                    await ws.send_json({
+                                        "type": "tool_call",
+                                        "toolName": fr.name,
+                                        "status": "done",
+                                        "output": fr.response,
+                                    })
 
             # Run both tasks concurrently
             task_user: asyncio.Task[None] = asyncio.create_task(
@@ -514,6 +522,8 @@ async def handle_text_message(
         full_text: str = ""
         used_model: str = TEXT_MODEL
         max_tool_turns: int = 5
+        # Track executed tool calls across all turns to prevent re-execution
+        executed_tool_keys: set[str] = set()
 
         for model_name in (TEXT_MODEL, TEXT_MODEL_FALLBACK):
             try:
@@ -539,6 +549,7 @@ async def handle_text_message(
                         ),
                     )
 
+                    chunk_idx: int = 0
                     async for chunk in stream:
                         if not chunk.candidates:
                             continue
@@ -546,6 +557,13 @@ async def handle_text_message(
                             response_parts.append(part)
                             if part.function_call:
                                 function_calls.append(part.function_call)
+                                logger.info(
+                                    "DIAG chunk=%d fc_name=%s fc_args=%s fc_id=%s",
+                                    chunk_idx,
+                                    part.function_call.name,
+                                    dict(part.function_call.args) if part.function_call.args else {},
+                                    getattr(part.function_call, 'id', 'NO_ID'),
+                                )
                             elif part.text:
                                 turn_text += part.text
                                 full_text += part.text
@@ -554,33 +572,69 @@ async def handle_text_message(
                                     "content": part.text,
                                     "model": model_name,
                                 })
+                        chunk_idx += 1
+
+                    logger.info(
+                        "DIAG turn=%d total_function_calls=%d names=%s",
+                        _turn, len(function_calls),
+                        [fc.name for fc in function_calls],
+                    )
 
                     # If no function calls, we're done
                     if not function_calls:
                         break
-
-                    # Deduplicate: skip duplicate tool calls with same name+args
-                    seen: set[str] = set()
-                    unique_calls: list[Any] = []
-                    for fc in function_calls:
-                        dedup_key: str = f"{fc.name}:{sorted(dict(fc.args).items()) if fc.args else ''}"
-                        if dedup_key not in seen:
-                            seen.add(dedup_key)
-                            unique_calls.append(fc)
-                        else:
-                            logger.info("Skipping duplicate tool call: %s", fc.name)
-                    function_calls = unique_calls
 
                     # Append model response (with function call parts) to history
                     context_contents.append(
                         genai.types.Content(role="model", parts=response_parts)
                     )
 
-                    # Execute each function call and collect results
+                    # Deduplicate: mark which calls to actually execute vs skip.
+                    # Use json.dumps for reliable protobuf MapComposite serialization.
+                    # Strip empty/falsy values so {action:"list"} matches
+                    # {action:"list", name:""}.
+                    import json as _json
+
+                    def _dedup_key(fc: Any) -> str:
+                        try:
+                            raw: dict[str, Any] = {
+                                str(k): v for k, v in (fc.args.items() if fc.args else [])
+                            }
+                        except Exception:
+                            raw = {}
+                        normalized: dict[str, Any] = {k: v for k, v in raw.items() if v}
+                        return f"{fc.name}:{_json.dumps(normalized, sort_keys=True)}"
+
+                    # Execute each function call and collect results.
+                    # Skipped duplicates still get a response part so Gemini's
+                    # context stays consistent (one response per function_call).
                     function_response_parts: list[Any] = []
-                    for fc in function_calls:
+                    tool_result_cache: dict[str, dict[str, Any]] = {}
+                    for fc_idx, fc in enumerate(function_calls):
                         fn_name: str = fc.name
                         fn_args: dict[str, Any] = dict(fc.args) if fc.args else {}
+                        key: str = _dedup_key(fc)
+                        logger.info(
+                            "DIAG fc_idx=%d key=%r executed_keys=%s",
+                            fc_idx, key, executed_tool_keys,
+                        )
+
+                        # If we already executed this exact call, reuse the
+                        # cached result — no re-execution, no frontend badge.
+                        if key in executed_tool_keys:
+                            cached: dict[str, Any] = tool_result_cache.get(
+                                key, {"result": "duplicate call skipped"}
+                            )
+                            logger.info("Skipping duplicate tool call: %s(%s)", fn_name, fn_args)
+                            function_response_parts.append(
+                                genai.types.Part.from_function_response(
+                                    name=fn_name,
+                                    response=cached if isinstance(cached, dict) else {"result": cached},
+                                )
+                            )
+                            continue
+
+                        executed_tool_keys.add(key)
                         logger.info("Text mode tool call: %s(%s)", fn_name, fn_args)
 
                         # Notify frontend about the tool call
@@ -603,6 +657,9 @@ async def handle_text_message(
                             logger.warning("Tool %s failed: %s", fn_name, str(tool_err))
                             result = {"error": str(tool_err)}
                             tool_failed = True
+
+                        # Cache the result for potential duplicate calls
+                        tool_result_cache[key] = result if isinstance(result, dict) else {"result": result}
 
                         # Notify frontend about tool completion or error
                         try:
