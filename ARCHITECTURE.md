@@ -130,8 +130,8 @@ tools = [
 | Mode | Model | Best for | How it works |
 |------|-------|----------|--------------|
 | **Lobby** (no paper) | Voice: `live-2.5-flash-native-audio`, Text: `3.1-flash-lite` | Library browsing, paper discovery, general research questions | Agent has Zotero + Semantic Scholar + web search. No paper-specific tools. Transitions to paper mode when a paper is selected. |
-| **Paper + voice** | `live-2.5-flash-native-audio` + Pro via `deep_analysis` | Exploration, Q&A, "explain this to me", first-pass reading | Real-time audio via Live API. Full paper in context. Barge-in supported. Escalates to Pro for complex reasoning. |
-| **Paper + text** | `3.1-flash-lite` + Pro via `deep_analysis` | Derivations, equations, code, structured output | Standard `generateContent`. Markdown formatting. Cheap for routine questions, Pro for depth. |
+| **Paper + voice** | `live-2.5-flash-native-audio` | Exploration, Q&A, "explain this to me", first-pass reading | Real-time audio via Live API. Full paper in context. Barge-in supported. |
+| **Paper + text** | `3.1-flash-lite` | Derivations, equations, code, structured output | Standard `generateContent`. Markdown formatting. |
 
 Voice and text modes share a **unified chat transcript** — every voice exchange is transcribed and displayed as text in the chat panel, so the user can switch between modes at any point without losing context. All thinking, tool calls, and reasoning steps are visible in the chat (collapsed by default, expandable on click). See the Chat UI section below for details.
 
@@ -157,7 +157,7 @@ Beyond just answering questions about the paper's content, the agent actively us
 | "They reference a Smith et al. 2023 paper — what's that about?" | Searches Semantic Scholar → summarizes the referenced paper → checks if it's in your library → offers to add it |
 | "Compare their approach to the LOFAR method" | Searches web for LOFAR methodology → explains the differences → suggests relevant papers |
 | "Is this result consistent with other experiments?" | Searches for corroborating/contradicting papers via Google Search + Semantic Scholar |
-| "I don't buy their error analysis" | Calls `deep_analysis` → Pro model critiques the methodology step-by-step → Flash relays the critique conversationally. Searches for papers with similar concerns. User sees the full Pro reasoning in an expandable panel in the chat. |
+| "I don't buy their error analysis" | Critiques the methodology step-by-step, searches for papers with similar concerns |
 | "Tag this as 'needs-replication' and put it in my HERA collection" | Calls Zotero plugin to add tags and move to collection |
 | "What's new in 21cm cosmology since this was published?" | Google Search grounding for recent developments, Semantic Scholar for recent papers |
 
@@ -204,7 +204,7 @@ The frontend runs locally via `npm run dev`, giving it access to Zotero through 
 
 **Write operations flow through the Zotero plugin:** When the agent needs to create notes, add tags, create annotations, or add papers, the tool call is handled by the backend, which instructs the frontend (via the WebSocket) to call the plugin's endpoints on `localhost:23119/colloquia/*`. This keeps all Zotero write operations local — Cloud Run never needs to reach the user's machine directly.
 
-**Why backend proxy over direct client-to-Gemini:** The backend manages tool execution server-side — when Gemini emits a `function_call` mid-stream, the backend executes it (Semantic Scholar search, deep_analysis via Pro, etc.) and sends the `function_response` back, all without the frontend needing to know about tool internals. With direct client-to-Gemini from the browser, you'd need to relay tool calls back to the backend anyway. The backend proxy pattern also keeps the user's API key off the client-side network (it only transits to Google's API, not to arbitrary tool endpoints). The user's Gemini API key is sent once per session via the WebSocket handshake and used server-side — never stored persistently.
+**Why backend proxy over direct client-to-Gemini:** The backend manages tool execution server-side — when Gemini emits a `function_call` mid-stream, the backend executes it (Semantic Scholar search, Zotero operations, etc.) and sends the `function_response` back, all without the frontend needing to know about tool internals. With direct client-to-Gemini from the browser, you'd need to relay tool calls back to the backend anyway. The backend proxy pattern also keeps the user's API key off the client-side network (it only transits to Google's API, not to arbitrary tool endpoints). The user's Gemini API key is sent once per session via the WebSocket handshake and used server-side — never stored persistently.
 
 ### Bring-your-own-key (BYOK) architecture
 
@@ -318,8 +318,8 @@ type ServerMessage =
       input?: Record<string, any>;               // parameters (shown when expanded)
       output?: Record<string, any>;              // result (shown when expanded)
       duration_ms?: number;
-      model?: string }                           // "gemini-3.1-pro-preview" for deep_analysis
-  | { type: "thinking"; content: string }        // reasoning trace from Pro (collapsed in chat)
+      model?: string }
+  | { type: "thinking"; content: string }        // reasoning trace (collapsed in chat)
   | { type: "context_usage";                     // token usage for UI progress bar
       total_tokens: number; limit: number }
   | { type: "error"; message: string }
@@ -398,40 +398,14 @@ A regression reported on the Google AI Developers Forum shows that **Google Sear
 
 ### Smart tiered model hierarchy
 
-Colloquia uses three model tiers to balance cost, speed, and reasoning depth. The user never manually switches — the agent decides when to escalate.
+Colloquia uses two model tiers to balance cost and speed.
 
 | Tier | Model | Role | When it's used |
 |------|-------|------|----------------|
 | **Voice** | `gemini-live-2.5-flash-native-audio` | Real-time audio conversation | Always (only option for Live API audio) |
 | **Text** | `gemini-3.1-flash-lite` | Fast text responses, routine questions | Default for text chat — cheap, handles 90% of questions |
-| **Deep reasoning** | `gemini-3.1-pro-preview` | Complex analysis, derivations, critique | Called on-demand via `deep_analysis` tool by either Flash agent |
 
-**Do NOT use:** `gemini-live-2.5-flash-preview-native-audio-09-2025` — **deprecated March 19, 2026**. Also: `gemini-3-pro-preview` shut down March 9; use `gemini-3.1-pro-preview`. Gemini 2.0 Flash retires June 1.
-
-### Pro delegation via tool call
-
-Both the Live API voice agent and the text agent have a `deep_analysis` function tool. When the user asks something requiring heavy reasoning — critiquing methodology, working through a derivation, synthesizing across multiple papers, evaluating statistical claims — the Flash agent calls `deep_analysis` with the question and relevant context. The backend routes that to `gemini-3.1-pro-preview`, gets the response, and feeds it back to the Flash agent, which relays it to the user.
-
-```python
-async def deep_analysis(query: str, context: str = "") -> dict:
-    """Delegate complex reasoning to Gemini 3.1 Pro.
-    Use for: methodology critique, mathematical derivations,
-    multi-paper synthesis, statistical analysis, or any question
-    requiring careful step-by-step reasoning."""
-
-    client = genai.Client(api_key=session_api_key)
-    response = await client.models.generate_content(
-        model="gemini-3.1-pro-preview",
-        contents=[{"role": "user", "parts": [{"text": f"{context}\n\nQuestion: {query}"}]}]
-    )
-    return {"analysis": response.text}
-```
-
-**How it feels in voice mode:** The Flash agent says "Let me think about that more carefully..." → calls `deep_analysis` → waits for Pro response (~3-8 seconds) → explains the result conversationally. The user hears a natural pause, not silence — the agent's "Let me think..." filler covers the latency.
-
-**How it feels in text mode:** The Flash-Lite agent can either paraphrase the Pro response for brevity or pass it through with full markdown formatting (equations, structured arguments, step-by-step derivations). Since text mode doesn't have real-time pressure, the Pro latency is less noticeable.
-
-**Cost impact:** Flash-Lite handles ~90% of interactions at extremely low cost. Pro is only called for genuinely complex questions — maybe 2-5 times per session. A typical session might cost $0.01 in Flash-Lite and $0.03-0.05 in Pro calls, keeping total costs under $0.10 even for heavy sessions.
+**Do NOT use:** `gemini-live-2.5-flash-preview-native-audio-09-2025` — **deprecated March 19, 2026**. Gemini 2.0 Flash retires June 1.
 
 ### Free tier limits and pricing (user's own key)
 
@@ -465,7 +439,6 @@ TOOL_REGISTRY = {
     "manage_tags": manage_tags,
     "manage_collection": manage_collection,
     "link_related_items": link_related_items,
-    "deep_analysis": deep_analysis,
     "trash_items": trash_items,
 }
 
@@ -600,7 +573,7 @@ async def handle_tool_calls(ws: WebSocket, session, tool_call, session_request_i
             await ws.send_json({
                 "type": "tool_call", "id": tool_id, "tool": fc.name,
                 "status": "done", "output": result, "duration_ms": duration,
-                "model": "gemini-3.1-pro-preview" if fc.name == "deep_analysis" else None
+                "model": None
             })
             responses.append(types.FunctionResponse(
                 name=fc.name, id=fc.id, response=result
@@ -1078,7 +1051,7 @@ type ThinkingStep = {
 };
 
 type ToolCallEvent = {
-  tool: string;                               // "deep_analysis", "search_academic_papers", etc.
+  tool: string;                               // "search_academic_papers", "annotate_zotero_pdf", etc.
   input: Record<string, any>;                 // parameters sent to the tool
   output: Record<string, any>;                // result from the tool
   duration_ms: number;                        // how long the tool call took
@@ -1100,7 +1073,7 @@ The chat panel shows everything that happens during a conversation — not just 
 │ 🤖 Colloquia                                        │
 │                                                      │
 │  ▶ Thinking...                          [collapsed]  │
-│  ▶ 🔧 deep_analysis called             [collapsed]  │
+│  ▶ 🔍 search_academic_papers called     [collapsed]  │
 │  ▶ 🔍 Google Search: "bootstrap error   [collapsed]  │
 │      estimation radio interferometry"                │
 │                                                      │
@@ -1124,34 +1097,25 @@ The chat panel shows everything that happens during a conversation — not just 
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  ▼ 🔧 deep_analysis (3.2s)             [expanded]   │
+│  ▼ 🔍 search_academic_papers (1.8s)    [expanded]   │
 │  ┌─────────────────────────────────────────────────┐ │
-│  │ Query: "Evaluate the statistical validity of    │ │
-│  │ the bootstrap error estimation in Section 4.2,  │ │
-│  │ specifically whether resampling visibilities     │ │
-│  │ without accounting for frequency covariance      │ │
-│  │ produces valid error bars."                      │ │
+│  │ Query: "bootstrap error estimation radio        │ │
+│  │ interferometry visibility covariance"            │ │
 │  │                                                  │ │
-│  │ Model: gemini-3.1-pro-preview                    │ │
-│  │                                                  │ │
-│  │ Response: "The bootstrap procedure described in  │ │
-│  │ Section 4.2 has a methodological concern. The    │ │
-│  │ authors resample individual visibility           │ │
-│  │ measurements assuming independence, but radio     │ │
-│  │ interferometric visibilities at adjacent          │ │
-│  │ frequencies are correlated through the           │ │
-│  │ instrument bandpass and the sky signal itself..." │ │
+│  │ Results: 3 papers found                          │ │
+│  │ 1. "On the validity of bootstrap resampling..." │ │
+│  │ 2. "Frequency covariance in visibility-based..." │ │
+│  │ 3. "Statistical methods for 21cm power..."      │ │
 │  └─────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────┘
 ```
 
-**Implementation:** The backend sends `tool_status` messages via WebSocket for every tool call lifecycle event. The frontend appends these to the current `ChatMessage`'s `toolCalls` array. For `deep_analysis`, the backend additionally sends `thinking` content if the Pro model returns chain-of-thought. The React component renders each tool call as a collapsible `<details>` element.
+**Implementation:** The backend sends `tool_status` messages via WebSocket for every tool call lifecycle event. The frontend appends these to the current `ChatMessage`'s `toolCalls` array. The React component renders each tool call as a collapsible `<details>` element.
 
 ```typescript
 // React component for a tool call
 function ToolCallBadge({ event }: { event: ToolCallEvent }) {
   const icon = {
-    deep_analysis: "🔧",
     search_academic_papers: "🔍",
     annotate_zotero_pdf: "✏️",
     google_search: "🌐",
@@ -1857,7 +1821,6 @@ What the user experiences for specific failures:
 | Zotero plugin timeout (10s) | Toast: "Zotero didn't respond" | "I couldn't write to Zotero — is it still running? Check that the Colloquia plugin is installed." |
 | Gemini session drops | **Reconnection spinner** overlay on chat | (Session resumes automatically via resumption handle — user sees "Reconnecting..." for 1-3s) |
 | Resumption fails entirely | **Session ended** modal with "Start new session" button | (No agent — UI handles this) |
-| `deep_analysis` Pro call fails | Toast: "Advanced analysis unavailable" | "I couldn't get a deeper analysis on that. Let me give you my best take with what I know..." (Flash answers directly) |
 
 ### Connection state indicator
 
@@ -2044,12 +2007,6 @@ You have access to Google Search and Semantic Scholar. USE THEM LIBERALLY:
 - annotate_zotero_pdf — create live annotations in Zotero's PDF reader when
   discussing figures, tables, or equations. Use purple (#a28ae5). Include a
   concise analysis as the annotation comment.
-- deep_analysis — delegate to Gemini Pro for heavy reasoning. Use for:
-  methodology critique, mathematical derivations, multi-paper synthesis,
-  statistical analysis, evaluating experimental design, or anything needing
-  careful step-by-step reasoning. In voice mode, say "Let me think about that
-  more carefully..." before calling. The user sees this tool call in their
-  chat panel.
 - manage_tags — suggest and apply tags after discussion
 - manage_collection — organize papers into collections
 - link_related_items — connect related papers
@@ -2086,8 +2043,6 @@ When you notice a referenced paper in the discussion:
 If a tool returns an error, explain the issue briefly and try an alternative:
 - Semantic Scholar fails → "Paper search is temporarily unavailable. Let me
   try Google Search instead." (use Google Search grounding)
-- deep_analysis fails → "I couldn't get a deeper analysis right now. Let me
-  give you my best take..." (answer with Flash directly)
 - Zotero write fails → "I couldn't save that to Zotero — is it still running?
   You can do it manually: [describe the action]."
 - Annotation coordinates invalid → "I wasn't able to place that annotation
@@ -2173,7 +2128,6 @@ colloquia/
 │   ├── session_handler.py        # Tool orchestration loop, audio forwarding
 │   ├── tools/
 │   │   ├── semantic_scholar.py   # Paper search integration
-│   │   ├── deep_analysis.py      # Pro model delegation
 │   │   ├── zotero_proxy.py       # Zotero action relay (backend → frontend → plugin)
 │   │   └── pdf_processing.py     # Page image rendering, coordinate mapping, fulltext quality check
 │   ├── prompts/

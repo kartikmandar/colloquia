@@ -12,11 +12,10 @@ from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.models.google_llm import Gemini
 from google.genai import types
 
-from agents.deep_analysis_agent import create_deep_analysis_tool
 from config import LIVE_MODEL, AGENT_NAME
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
-from tools.local_tools import echo, search_academic_papers, get_paper_recommendations
+from tools.local_tools import search_academic_papers, get_paper_recommendations
 from tools.zotero_tools import ZoteroToolContext, create_zotero_tools
 
 
@@ -46,7 +45,6 @@ def create_colloquia_agent(
     ws: WebSocket,
     zotero_ctx: ZoteroToolContext,
     model: Gemini | None = None,
-    deep_analysis_model: Gemini | None = None,
 ) -> LlmAgent:
     """Create the main Colloquia agent with all tools.
 
@@ -54,7 +52,6 @@ def create_colloquia_agent(
         ws: The WebSocket for this session (Zotero tools close over it).
         zotero_ctx: Per-session Zotero tool context.
         model: Pre-configured Gemini model instance (for BYOK).
-        deep_analysis_model: Pre-configured Gemini model for deep analysis sub-agent.
 
     Returns:
         Configured LlmAgent.
@@ -62,14 +59,11 @@ def create_colloquia_agent(
     zotero_tools: list[Any] = create_zotero_tools(ws, zotero_ctx)
 
     local_tools: list[Any] = [
-        echo,
         search_academic_papers,
         get_paper_recommendations,
     ]
 
-    deep_analysis_tool = create_deep_analysis_tool(model=deep_analysis_model)
-
-    all_tools: list[Any] = local_tools + zotero_tools + [deep_analysis_tool]
+    all_tools: list[Any] = local_tools + zotero_tools
 
     return LlmAgent(
         name=AGENT_NAME,

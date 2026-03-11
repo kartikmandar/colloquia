@@ -18,7 +18,7 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService, Session
 
 from agents.colloquia_agent import create_colloquia_agent
-from config import APP_NAME, DEEP_ANALYSIS_MODEL, LIVE_MODEL
+from config import APP_NAME, LIVE_MODEL
 from tools.zotero_tools import ZoteroToolContext
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -65,15 +65,11 @@ async def create_session_bundle(
     async with _api_key_lock:
         os.environ["GOOGLE_API_KEY"] = api_key
         model: Gemini = Gemini(model=LIVE_MODEL)
-        deep_model: Gemini = Gemini(model=DEEP_ANALYSIS_MODEL)
         # Force Client creation now while env var is correct
         _ = model.api_client
         _ = model._live_api_client
-        _ = deep_model.api_client
 
-    agent = create_colloquia_agent(
-        ws, zotero_ctx, model=model, deep_analysis_model=deep_model
-    )
+    agent = create_colloquia_agent(ws, zotero_ctx, model=model)
 
     session_service: InMemorySessionService = InMemorySessionService()
 

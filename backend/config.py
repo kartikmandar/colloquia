@@ -7,9 +7,6 @@ LIVE_MODEL: str = "gemini-2.5-flash-native-audio-latest"
 TEXT_MODEL: str = "gemini-3.1-flash-lite-preview"
 TEXT_MODEL_FALLBACK: str = "gemini-2.5-flash"
 
-# Deep analysis (complex reasoning)
-DEEP_ANALYSIS_MODEL: str = "gemini-2.5-pro"
-
 # Agent name
 AGENT_NAME: str = "colloquia"
 APP_NAME: str = "colloquia-app"

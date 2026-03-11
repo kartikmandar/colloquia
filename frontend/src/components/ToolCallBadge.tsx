@@ -14,7 +14,6 @@ interface ToolCallBadgeProps {
 }
 
 function getToolIcon(toolName: string): string {
-  if (toolName.includes("deep_analysis")) return "[analysis]";
   if (toolName.includes("search")) return "[search]";
   if (toolName.includes("annotate")) return "[annotate]";
   if (toolName.includes("google")) return "[web]";

@@ -60,12 +60,6 @@ You have access to Google Search and Semantic Scholar. USE THEM LIBERALLY:
 - annotate_zotero_pdf — create live annotations in Zotero's PDF reader when \
   discussing figures, tables, or equations. Use purple (#a28ae5). Include a \
   concise analysis as the annotation comment.
-- deep_analysis — delegate to Gemini Pro for heavy reasoning. Use for: \
-  methodology critique, mathematical derivations, multi-paper synthesis, \
-  statistical analysis, evaluating experimental design, or anything needing \
-  careful step-by-step reasoning. In voice mode, say "Let me think about that \
-  more carefully..." before calling. The user sees this tool call in their \
-  chat panel.
 - manage_tags — suggest and apply tags after discussion
 - manage_collection — organize papers into collections
 - link_related_items — connect related papers
@@ -111,8 +105,6 @@ exactly once. To search the library, use one search_zotero_library call.
 If a tool returns an error, explain the issue briefly and try an alternative:
 - Semantic Scholar fails → "Paper search is temporarily unavailable. Let me \
   try Google Search instead." (use Google Search grounding)
-- deep_analysis fails → "I couldn't get a deeper analysis right now. Let me \
-  give you my best take..." (answer with Flash directly)
 - Zotero write fails → "I couldn't save that to Zotero — is it still running? \
   You can do it manually: [describe the action]."
 - Annotation coordinates invalid → "I wasn't able to place that annotation \

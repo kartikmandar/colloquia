@@ -275,7 +275,6 @@ export function useWebSocket({
               search_academic_papers: "Paper search unavailable",
               get_paper_recommendations: "Paper recommendations unavailable",
               annotate_zotero_pdf: "Annotation placement failed",
-              deep_analysis: "Advanced analysis unavailable",
               search_zotero_library: "Zotero search failed",
             };
             const friendlyMsg: string =

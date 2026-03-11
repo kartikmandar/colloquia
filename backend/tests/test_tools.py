@@ -1,11 +1,11 @@
 """Integration tests for all Colloquia tools — NO mocks, real API calls.
 
 Tests cover:
-- Local tools: echo, search_academic_papers, get_paper_recommendations
+- Local tools: search_academic_papers, get_paper_recommendations
 - Semantic Scholar API: search, DOI lookup, recommendations
 - Zotero plugin: all 16 endpoints via direct HTTP (localhost:23119)
 - PDF processing: coordinate mapping, validation, page selection, rendering
-- Deep analysis agent + main agent: creation with real Gemini model strings
+- Main agent: creation with real Gemini model strings
 - Prompt switching: dynamic instruction based on session mode
 
 Prerequisites:
@@ -30,7 +30,7 @@ import pytest
 # Add backend to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tools.local_tools import echo, search_academic_papers, get_paper_recommendations
+from tools.local_tools import search_academic_papers, get_paper_recommendations
 from tools.semantic_scholar import (
     search_academic_papers as s2_search,
     get_paper_by_doi,
@@ -51,22 +51,17 @@ from tools.zotero_tools import (
     create_zotero_tools,
     resolve_zotero_result,
 )
-from agents.deep_analysis_agent import (
-    create_deep_analysis_agent,
-    create_deep_analysis_tool,
-    DEEP_ANALYSIS_INSTRUCTION,
-)
 from agents.colloquia_agent import create_colloquia_agent, _dynamic_instruction
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
-from config import LIVE_MODEL, DEEP_ANALYSIS_MODEL, AGENT_NAME
+from config import LIVE_MODEL, AGENT_NAME
 
 
 # ============================================================================
 # Constants
 # ============================================================================
 
-ZOTERO_BASE = "http://localhost:23119"
+ZOTERO_BASE = "http://localhost:23124"
 COLLOQUIA_BASE = f"{ZOTERO_BASE}/colloquia"
 
 
@@ -157,35 +152,7 @@ def long_pdf():
 
 
 # ============================================================================
-# 1. Local Tools — echo
-# ============================================================================
-
-class TestEcho:
-    @pytest.mark.asyncio
-    async def test_echo_returns_message(self):
-        result = await echo("hello world")
-        assert result == {"echo": "hello world"}
-
-    @pytest.mark.asyncio
-    async def test_echo_empty_string(self):
-        result = await echo("")
-        assert result == {"echo": ""}
-
-    @pytest.mark.asyncio
-    async def test_echo_unicode(self):
-        msg = "测试 émojis 🔬 and spëcial chars"
-        result = await echo(msg)
-        assert result == {"echo": msg}
-
-    @pytest.mark.asyncio
-    async def test_echo_long_message(self):
-        msg = "x" * 10000
-        result = await echo(msg)
-        assert result["echo"] == msg
-
-
-# ============================================================================
-# 2. Semantic Scholar — real API calls
+# 1. Semantic Scholar — real API calls
 # ============================================================================
 
 class TestSemanticScholarSearch:
@@ -845,33 +812,7 @@ from unittest.mock import AsyncMock
 
 
 # ============================================================================
-# 7. Deep Analysis Agent
-# ============================================================================
-
-class TestDeepAnalysisAgent:
-    def test_create_agent_with_model_string(self):
-        agent = create_deep_analysis_agent()
-        assert agent.name == "deep_analysis"
-        assert agent.model == DEEP_ANALYSIS_MODEL
-        assert "deep analysis engine" in agent.instruction.lower()
-
-    def test_create_agent_has_description(self):
-        agent = create_deep_analysis_agent()
-        assert agent.description is not None
-        assert "deep" in agent.description.lower()
-
-    def test_create_tool(self):
-        tool = create_deep_analysis_tool()
-        assert tool is not None
-        assert tool.agent.name == "deep_analysis"
-
-    def test_instruction_content(self):
-        assert "Colloquia" in DEEP_ANALYSIS_INSTRUCTION
-        assert "analysis" in DEEP_ANALYSIS_INSTRUCTION.lower()
-
-
-# ============================================================================
-# 8. Main Agent Creation
+# 7. Main Agent Creation
 # ============================================================================
 
 class TestCreateColloquiaAgent:
@@ -880,8 +821,8 @@ class TestCreateColloquiaAgent:
         ctx = ZoteroToolContext()
         agent = create_colloquia_agent(ws, ctx)
         assert agent.name == AGENT_NAME
-        # 3 local + 8 zotero + 1 deep analysis = 12
-        assert len(agent.tools) == 12
+        # 2 local + 8 zotero = 10
+        assert len(agent.tools) == 10
 
     def test_agent_model(self):
         ws = AsyncMock()
@@ -972,7 +913,6 @@ class TestBuildPaperPrompt:
     def test_mentions_tools(self):
         prompt = build_paper_prompt(title="Test")
         assert "annotate_zotero_pdf" in prompt
-        assert "deep_analysis" in prompt
         assert "search_academic_papers" in prompt
 
 

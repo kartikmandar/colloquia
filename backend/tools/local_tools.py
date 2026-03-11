@@ -1,4 +1,4 @@
-"""Local tools — echo, academic search, recommendations.
+"""Local tools — academic search, recommendations.
 
 These are pure async functions that ADK wraps as FunctionTool automatically.
 ADK limitation: no default parameter values. All params required; sentinel
@@ -11,15 +11,6 @@ from tools.semantic_scholar import (
     search_academic_papers as _s2_search,
     get_paper_recommendations as _s2_recommend,
 )
-
-
-async def echo(message: str) -> dict[str, str]:
-    """Test tool that echoes back a message. Use this to verify tool calling works.
-
-    Args:
-        message: The message to echo back.
-    """
-    return {"echo": message}
 
 
 async def search_academic_papers(query: str, year: str, limit: int) -> dict[str, Any]:
