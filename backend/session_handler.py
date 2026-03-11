@@ -404,10 +404,13 @@ def build_live_config(
         system_prompt: Optional system prompt override (defaults to LOBBY_SYSTEM_PROMPT).
         resumption_handle: Optional session resumption handle for reconnection.
     """
-    session_resumption: types.SessionResumptionConfig = types.SessionResumptionConfig()
+    session_resumption: types.SessionResumptionConfig = types.SessionResumptionConfig(
+        transparent=True,
+    )
     if resumption_handle:
         session_resumption = types.SessionResumptionConfig(
             handle=resumption_handle,
+            transparent=True,
         )
 
     return types.LiveConnectConfig(
@@ -486,6 +489,33 @@ async def run_session(
                         "type": "session_status",
                         "status": "connected",
                     })
+                    # If reconnecting without a resumption handle, inject
+                    # conversation history so Gemini has context.
+                    if not resumption_handle and conversation_state.timeline:
+                        history_parts: list[str] = []
+                        for evt in conversation_state.timeline[-20:]:
+                            prefix: str = "User" if evt.role == "user" else "Assistant"
+                            history_parts.append(f"{prefix}: {evt.content}")
+                        history_text: str = "\n".join(history_parts)
+                        await session.send_client_content(
+                            turns=types.Content(
+                                role="user",
+                                parts=[types.Part(text=(
+                                    "[SESSION RESUMED — conversation history for context]\n\n"
+                                    f"{history_text}"
+                                ))],
+                            ),
+                            turn_complete=False,
+                        )
+                        logger.info(
+                            "Injected %d conversation events into new session",
+                            len(history_parts),
+                        )
+
+                # Gate that pauses audio streaming while tool calls are pending.
+                # Sending audio during a pending tool call causes error 1008.
+                audio_gate: asyncio.Event = asyncio.Event()
+                audio_gate.set()  # Start open (audio allowed)
 
                 async def forward_user_to_gemini() -> None:
                     """Read from frontend WebSocket, send to Gemini Live session."""
@@ -496,6 +526,9 @@ async def run_session(
                             msg_type: str = raw.get("type", "")
 
                             if msg_type == "audio":
+                                # Wait for any pending tool calls to complete
+                                # before forwarding audio to Gemini.
+                                await audio_gate.wait()
                                 audio_bytes: bytes = base64.b64decode(raw["data"])
                                 await session.send_realtime_input(
                                     audio=types.Blob(
@@ -544,13 +577,18 @@ async def run_session(
                             })
 
                         # Tool calls -> execute and respond
+                        # Pause audio input while tool calls are pending (error 1008 prevention)
                         if message.tool_call:
-                            await handle_tool_calls(
-                                ws, session, message.tool_call,
-                                session_request_ids, api_key,
-                                s2_api_key=s2_api_key,
-                                conversation_state=conversation_state,
-                            )
+                            audio_gate.clear()
+                            try:
+                                await handle_tool_calls(
+                                    ws, session, message.tool_call,
+                                    session_request_ids, api_key,
+                                    s2_api_key=s2_api_key,
+                                    conversation_state=conversation_state,
+                                )
+                            finally:
+                                audio_gate.set()
 
                         # Server content (transcripts, interruptions)
                         if message.server_content:
@@ -623,15 +661,27 @@ async def run_session(
                     )
                     for task in pending:
                         task.cancel()
+                    # Await cancelled tasks to ensure clean shutdown
+                    for task in pending:
+                        try:
+                            await task
+                        except (asyncio.CancelledError, Exception):
+                            pass
                     for task in done:
                         if task.exception():
                             raise task.exception()  # type: ignore[misc]
-                    # If Gemini session ended normally (not GoAway) and we
-                    # have a resumption handle, auto-reconnect to preserve context
-                    if resumption_handle and not should_reconnect:
-                        if task_gemini in done and not task_gemini.exception():
+
+                    # If Gemini task ended (not frontend), reconnect to keep
+                    # the frontend WebSocket alive.
+                    if not should_reconnect and task_gemini in done:
+                        if resumption_handle:
                             logger.info("Gemini session ended, reconnecting with resumption handle")
-                            should_reconnect = True
+                        else:
+                            logger.info("Gemini session ended unexpectedly, reconnecting without handle")
+                        should_reconnect = True
+                    elif task_user in done:
+                        # Frontend disconnected — no point reconnecting Gemini
+                        logger.info("Frontend task ended, not reconnecting Gemini")
                 finally:
                     if not should_reconnect:
                         # Cleanup orphaned Zotero futures only on actual exit
@@ -642,7 +692,7 @@ async def run_session(
 
         except Exception as e:
             logger.error("Session error: %s", str(e))
-            if resumption_handle and reconnect_count < max_reconnects:
+            if reconnect_count < max_reconnects:
                 should_reconnect = True
             else:
                 # Cleanup orphaned Zotero futures before raising
@@ -655,9 +705,17 @@ async def run_session(
         if should_reconnect:
             reconnect_count += 1
             logger.info(
-                "Reconnecting in 1 second (attempt %d/%d)...",
+                "Reconnecting Gemini in 1 second (attempt %d/%d)...",
                 reconnect_count, max_reconnects,
             )
+            try:
+                await ws.send_json({
+                    "type": "session_status",
+                    "status": "reconnecting",
+                })
+            except Exception:
+                # Frontend already gone — stop reconnecting
+                break
             await asyncio.sleep(1)  # Brief pause before reconnect
             continue
         else:
