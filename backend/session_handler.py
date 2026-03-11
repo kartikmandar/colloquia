@@ -488,7 +488,11 @@ async def handle_text_message(
                 f"- get_paper_recommendations — find similar papers\n"
                 f"- manage_tags, manage_collection — organize the library\n"
                 f"- create_note — save notes to Zotero items\n"
-                f"Use tools proactively when the user asks about their library or papers."
+                f"Use tools proactively when the user asks about their library or papers.\n\n"
+                f"## CRITICAL Tool Usage Rules\n"
+                f"Call each tool ONCE per turn. Never call the same tool multiple times "
+                f"with different or similar parameters in a single response. One call with "
+                f"broad parameters is enough."
             )
         else:
             system_instruction = LOBBY_SYSTEM_PROMPT
@@ -555,6 +559,18 @@ async def handle_text_message(
                     if not function_calls:
                         break
 
+                    # Deduplicate: skip duplicate tool calls with same name+args
+                    seen: set[str] = set()
+                    unique_calls: list[Any] = []
+                    for fc in function_calls:
+                        dedup_key: str = f"{fc.name}:{sorted(dict(fc.args).items()) if fc.args else ''}"
+                        if dedup_key not in seen:
+                            seen.add(dedup_key)
+                            unique_calls.append(fc)
+                        else:
+                            logger.info("Skipping duplicate tool call: %s", fc.name)
+                    function_calls = unique_calls
+
                     # Append model response (with function call parts) to history
                     context_contents.append(
                         genai.types.Content(role="model", parts=response_parts)
@@ -575,37 +591,37 @@ async def handle_text_message(
                             "input": fn_args,
                         })
 
+                        tool_failed: bool = False
                         try:
                             fn_callable = tool_map.get(fn_name)
                             if fn_callable is None:
                                 result: dict[str, Any] = {"error": f"Unknown tool: {fn_name}"}
+                                tool_failed = True
                             else:
                                 result = await fn_callable(**fn_args)
                         except Exception as tool_err:
                             logger.warning("Tool %s failed: %s", fn_name, str(tool_err))
                             result = {"error": str(tool_err)}
-                            # Notify frontend about the tool error
-                            try:
+                            tool_failed = True
+
+                        # Notify frontend about tool completion or error
+                        try:
+                            if tool_failed or "error" in result:
                                 await ws.send_json({
                                     "type": "tool_call",
                                     "toolName": fn_name,
                                     "status": "error",
-                                    "error": str(tool_err),
+                                    "error": result.get("error", "Unknown error"),
                                 })
-                            except Exception:
-                                pass  # WebSocket may already be closed
-
-                        # Notify frontend tool completed (if not already error-notified)
-                        if "error" not in result:
-                            try:
+                            else:
                                 await ws.send_json({
                                     "type": "tool_call",
                                     "toolName": fn_name,
                                     "status": "done",
                                     "output": result,
                                 })
-                            except Exception:
-                                pass
+                        except Exception:
+                            pass  # WebSocket may already be closed
 
                         function_response_parts.append(
                             genai.types.Part.from_function_response(

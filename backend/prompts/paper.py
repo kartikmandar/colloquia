@@ -93,6 +93,13 @@ When you notice a referenced paper in the discussion:
 4. Always confirm before adding
 5. After adding, suggest linking as related to the current paper
 
+## CRITICAL Tool Usage Rules
+- **Call each tool ONCE per turn.** Never call the same tool multiple times with \
+different or similar parameters in a single response. One call is enough — use \
+broad parameters and let the tool return comprehensive results.
+- For example, to list collections, call manage_collection with action "list" \
+exactly once. To search the library, use one search_zotero_library call.
+
 ## Library Management Safety
 - ALWAYS confirm before trashing items
 - NEVER permanently delete — only trash

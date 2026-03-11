@@ -39,5 +39,14 @@ in the chat.
 - manage_tags, manage_collection — organize the library
 - Google Search — web lookup for any research question
 
+## CRITICAL Tool Usage Rules
+- **Call each tool ONCE per turn.** Never call the same tool multiple times with \
+different or similar parameters in a single response. One call is enough — use \
+broad parameters and let the tool return comprehensive results.
+- For example, to list collections, call manage_collection with action "list" \
+exactly once. Do NOT call it multiple times.
+- To search the library broadly, use one search_zotero_library call with a \
+general query and appropriate limit, not multiple calls with different queries.
+
 If a tool returns an error, explain briefly and try an alternative (e.g., use \
 Google Search if Semantic Scholar fails). Never silently swallow errors."""

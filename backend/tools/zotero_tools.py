@@ -91,8 +91,8 @@ def create_zotero_tools(
     from tools.pdf_processing import gemini_to_pdf_coords, validate_annotation_coords
 
     async def search_zotero_library(
-        query: str, tag: str, collection: str, author: str,
-        limit: int, fields: str,
+        query: str = "", tag: str = "", collection: str = "", author: str = "",
+        limit: int = 20, fields: str = "key,title,creators,year",
     ) -> dict[str, Any]:
         """Search the user's Zotero library for papers by title, author, tag, or collection.
 
@@ -223,7 +223,7 @@ def create_zotero_tools(
         }
         return await _delegate_to_frontend(ws, "createAnnotation", params, ctx)
 
-    async def manage_collection(action: str, name: str, collectionKey: str, itemKeys: str, parentCollectionKey: str) -> dict[str, Any]:
+    async def manage_collection(action: str, name: str = "", collectionKey: str = "", itemKeys: str = "", parentCollectionKey: str = "") -> dict[str, Any]:
         """Manage Zotero collections: list, create, add items, or remove items.
 
         Always confirm with the user before modifying.
@@ -264,7 +264,7 @@ def create_zotero_tools(
         keys: list[str] = [k.strip() for k in itemKeys.split(",")]
         return await _delegate_to_frontend(ws, "trashItems", {"itemKeys": keys}, ctx)
 
-    async def add_paper_to_zotero(doi: str, title: str, authors: str, url: str, abstract: str, collectionKey: str) -> dict[str, Any]:
+    async def add_paper_to_zotero(doi: str = "", title: str = "", authors: str = "", url: str = "", abstract: str = "", collectionKey: str = "") -> dict[str, Any]:
         """Add a discovered paper to the user's Zotero library.
 
         Provide a DOI for best results (automatic metadata lookup).
