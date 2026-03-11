@@ -1,6 +1,7 @@
+google-adk>=1.0.0
+google-genai
 fastapi
 uvicorn[standard]
 websockets
-google-genai
 httpx
 PyMuPDF

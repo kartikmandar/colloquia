@@ -1,0 +1,89 @@
+"""Main Colloquia agent — LlmAgent with dynamic instruction and all tools.
+
+Uses dynamic_instruction to switch between lobby and paper prompts based
+on session state.
+"""
+
+from typing import Any
+
+from fastapi import WebSocket
+from google.adk.agents import LlmAgent
+from google.adk.agents.readonly_context import ReadonlyContext
+from google.adk.models.google_llm import Gemini
+from google.genai import types
+
+from agents.deep_analysis_agent import create_deep_analysis_tool
+from config import LIVE_MODEL, AGENT_NAME
+from prompts.lobby import LOBBY_SYSTEM_PROMPT
+from prompts.paper import build_paper_prompt
+from tools.local_tools import echo, search_academic_papers, get_paper_recommendations
+from tools.zotero_tools import ZoteroToolContext, create_zotero_tools
+
+
+def _dynamic_instruction(context: ReadonlyContext) -> str:
+    """Return lobby or paper prompt based on session state."""
+    state: dict[str, Any] = context.state
+    mode: str = state.get("session_mode", "lobby")
+
+    if mode == "paper":
+        paper_ctx: dict[str, Any] = state.get("paper_context", {})
+        return build_paper_prompt(
+            title=paper_ctx.get("title", ""),
+            authors=paper_ctx.get("authors", ""),
+            year=paper_ctx.get("year", ""),
+            doi=paper_ctx.get("doi", ""),
+            venue=paper_ctx.get("venue", ""),
+            annotation_count=paper_ctx.get("annotation_count", 0),
+            note_count=paper_ctx.get("note_count", 0),
+            pdf_attachment_key=paper_ctx.get("pdf_attachment_key", ""),
+            user_annotations_summary=paper_ctx.get("user_annotations_summary", ""),
+        )
+
+    return LOBBY_SYSTEM_PROMPT
+
+
+def create_colloquia_agent(
+    ws: WebSocket,
+    zotero_ctx: ZoteroToolContext,
+    model: Gemini | None = None,
+    deep_analysis_model: Gemini | None = None,
+) -> LlmAgent:
+    """Create the main Colloquia agent with all tools.
+
+    Args:
+        ws: The WebSocket for this session (Zotero tools close over it).
+        zotero_ctx: Per-session Zotero tool context.
+        model: Pre-configured Gemini model instance (for BYOK).
+        deep_analysis_model: Pre-configured Gemini model for deep analysis sub-agent.
+
+    Returns:
+        Configured LlmAgent.
+    """
+    zotero_tools: list[Any] = create_zotero_tools(ws, zotero_ctx)
+
+    local_tools: list[Any] = [
+        echo,
+        search_academic_papers,
+        get_paper_recommendations,
+    ]
+
+    deep_analysis_tool = create_deep_analysis_tool(model=deep_analysis_model)
+
+    all_tools: list[Any] = local_tools + zotero_tools + [deep_analysis_tool]
+
+    return LlmAgent(
+        name=AGENT_NAME,
+        model=model if model else LIVE_MODEL,
+        instruction=_dynamic_instruction,
+        tools=all_tools,
+        generate_content_config=types.GenerateContentConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                        voice_name="Aoede",
+                    ),
+                ),
+            ),
+        ),
+    )

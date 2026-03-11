@@ -4,7 +4,6 @@ from typing import Any
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from google import genai
 
 from session_handler import run_session
 
@@ -49,18 +48,14 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         masked_key: str = api_key[:8] + "..."
         logger.info("Received API key: %s", masked_key)
 
-        # Create per-session Gemini client
-        client: genai.Client = genai.Client(api_key=api_key)
-        logger.info("Gemini client created for session")
-
         # Send session status
         await websocket.send_json({
             "type": "session_status",
             "status": "connected",
         })
 
-        # Hand off to the session handler (Gemini Live API event loop)
-        await run_session(websocket, client, config)
+        # Hand off to the ADK-based session handler
+        await run_session(websocket, config)
 
     except WebSocketDisconnect:
         logger.info("WebSocket disconnected")
