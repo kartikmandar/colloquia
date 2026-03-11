@@ -567,8 +567,9 @@ async def handle_text_message(
                         # Notify frontend about the tool call
                         await ws.send_json({
                             "type": "tool_call",
-                            "name": fn_name,
-                            "args": fn_args,
+                            "toolName": fn_name,
+                            "status": "calling",
+                            "input": fn_args,
                         })
 
                         try:
@@ -580,6 +581,28 @@ async def handle_text_message(
                         except Exception as tool_err:
                             logger.warning("Tool %s failed: %s", fn_name, str(tool_err))
                             result = {"error": str(tool_err)}
+                            # Notify frontend about the tool error
+                            try:
+                                await ws.send_json({
+                                    "type": "tool_call",
+                                    "toolName": fn_name,
+                                    "status": "error",
+                                    "error": str(tool_err),
+                                })
+                            except Exception:
+                                pass  # WebSocket may already be closed
+
+                        # Notify frontend tool completed (if not already error-notified)
+                        if "error" not in result:
+                            try:
+                                await ws.send_json({
+                                    "type": "tool_call",
+                                    "toolName": fn_name,
+                                    "status": "done",
+                                    "output": result,
+                                })
+                            except Exception:
+                                pass
 
                         function_response_parts.append(
                             genai.types.Part.from_function_response(
@@ -617,7 +640,10 @@ async def handle_text_message(
 
     except Exception as e:
         logger.error("Text message handling failed: %s", str(e))
-        await ws.send_json({
-            "type": "error",
-            "message": f"Text response failed: {str(e)}",
-        })
+        try:
+            await ws.send_json({
+                "type": "error",
+                "message": f"Text response failed: {str(e)}",
+            })
+        except Exception:
+            logger.warning("Could not send error to frontend — WebSocket already closed")

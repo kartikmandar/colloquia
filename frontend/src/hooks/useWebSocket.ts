@@ -325,6 +325,15 @@ export function useWebSocket({
 
         case "error":
           toast.error(data.message || "An error occurred");
+          // Clear any in-progress streaming state
+          setMessages((prev: ChatMessage[]) => {
+            const updated: ChatMessage[] = [...prev];
+            const last: ChatMessage | undefined = updated[updated.length - 1];
+            if (last && last.role === "model" && last.isStreaming) {
+              updated[updated.length - 1] = { ...last, isStreaming: false };
+            }
+            return updated;
+          });
           addMessage("model", `Error: ${data.message}`, "text");
           break;
 
