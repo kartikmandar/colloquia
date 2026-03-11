@@ -2,7 +2,7 @@
   "name": "zotero-colloquia-plugin",
   "type": "module",
   "version": "0.1.0",
-  "description": "Colloquia — Voice-powered AI research assistant for Zotero",
+  "description": "Colloquia — Voice-powered AI research assistant that connects Zotero with Gemini for paper discussions, annotations, and library management",
   "config": {
     "addonName": "Colloquia",
     "addonID": "colloquia@colloquia.dev",
