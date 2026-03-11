@@ -109,9 +109,12 @@ async def run_session(
 
                         elif msg_type == "text":
                             text_content: str = raw.get("content", "")
-                            await handle_text_message(
+                            # Run as task so the receive loop stays free to
+                            # process zotero_action_result messages (avoids
+                            # deadlock when tools delegate to frontend).
+                            asyncio.create_task(handle_text_message(
                                 ws, bundle, text_content, api_key
-                            )
+                            ))
 
                         elif msg_type == "paper_context":
                             await handle_paper_load(
