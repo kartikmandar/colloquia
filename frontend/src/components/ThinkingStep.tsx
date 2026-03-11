@@ -50,7 +50,7 @@ function ThinkingStep({
       </button>
 
       {expanded && (
-        <div className="mt-1 rounded-lg border border-purple-200 bg-purple-50 p-2 dark:border-purple-800 dark:bg-purple-950">
+        <div className="mt-1 max-h-64 overflow-y-auto rounded-lg border border-purple-200 bg-purple-50 p-2 dark:border-purple-800 dark:bg-purple-950">
           <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-purple-800 dark:text-purple-300">
             {content}
           </pre>

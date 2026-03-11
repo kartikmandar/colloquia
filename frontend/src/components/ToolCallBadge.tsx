@@ -76,7 +76,7 @@ function ToolCallBadge({
       </button>
 
       {expanded && (
-        <div className="mt-1 rounded-lg border border-border-primary bg-surface-secondary p-2 text-xs">
+        <div className="mt-1 max-h-64 overflow-y-auto rounded-lg border border-border-primary bg-surface-secondary p-2 text-xs">
           {input && Object.keys(input).length > 0 && (
             <div className="mb-1.5">
               <span className="font-semibold text-text-secondary">Input:</span>

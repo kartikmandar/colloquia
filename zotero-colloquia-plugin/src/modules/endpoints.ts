@@ -280,7 +280,7 @@ class SearchLibraryEndpoint {
   ): Promise<[number, string, string]> {
     try {
       const body = parseBody(request.data);
-      const { query, tag, collection, author, dateRange } = body;
+      const { query, tag, collection, author, dateRange, limit, fields } = body;
 
       const s = new Zotero.Search();
       (s as any).libraryID = Zotero.Libraries.userLibraryID;
@@ -320,28 +320,49 @@ class SearchLibraryEndpoint {
       const ids: number[] = await s.search();
       const items = await Zotero.Items.getAsync(ids);
 
-      // Serialize to lightweight JSON
-      const results = items
-        .filter((item: any) => item.isRegularItem())
-        .slice(0, 50) // Limit results
-        .map((item: any) => ({
-          key: item.key,
-          itemType: item.itemType,
-          title: item.getField("title"),
-          creators: item.getCreators().map((c: any) => ({
+      const maxResults: number = Math.min(Math.max(limit || 50, 1), 50);
+      // Determine which fields to include (default: all)
+      const requestedFields: string[] | null =
+        Array.isArray(fields) && fields.length > 0 ? fields : null;
+
+      const allFields: Record<string, (item: any) => any> = {
+        key: (item: any) => item.key,
+        itemType: (item: any) => item.itemType,
+        title: (item: any) => item.getField("title"),
+        creators: (item: any) =>
+          item.getCreators().map((c: any) => ({
             firstName: c.firstName || "",
             lastName: c.lastName || "",
-            creatorType: c.creatorType,
           })),
-          date: item.getField("date"),
-          year: item.getField("year"),
-          DOI: item.getField("DOI"),
-          abstractNote: item.getField("abstractNote"),
-          publicationTitle: item.getField("publicationTitle"),
-          tags: item.getTags().map((t: any) => t.tag),
-        }));
+        date: (item: any) => item.getField("date"),
+        year: (item: any) => item.getField("year"),
+        DOI: (item: any) => item.getField("DOI"),
+        abstractNote: (item: any) => item.getField("abstractNote"),
+        publicationTitle: (item: any) => item.getField("publicationTitle"),
+        tags: (item: any) => item.getTags().map((t: any) => t.tag),
+      };
 
-      return jsonResponse(200, { items: results });
+      const activeFields: string[] = requestedFields
+        ? requestedFields.filter((f: string) => f in allFields)
+        : Object.keys(allFields);
+
+      const regularItems = items.filter((item: any) => item.isRegularItem());
+      const totalResults: number = regularItems.length;
+
+      const results = regularItems
+        .slice(0, maxResults)
+        .map((item: any) => {
+          const obj: Record<string, any> = {};
+          for (const field of activeFields) {
+            obj[field] = allFields[field](item);
+          }
+          return obj;
+        });
+
+      return jsonResponse(200, {
+        totalResults,
+        items: results,
+      });
     } catch (e: any) {
       ztoolkit.log(`searchLibrary error: ${e.message}`);
       return jsonResponse(500, { error: e.message });

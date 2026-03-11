@@ -90,26 +90,43 @@ def create_zotero_tools(
     """
     from tools.pdf_processing import gemini_to_pdf_coords, validate_annotation_coords
 
-    async def search_zotero_library(query: str, tag: str, collection: str, author: str) -> dict[str, Any]:
+    async def search_zotero_library(
+        query: str, tag: str, collection: str, author: str,
+        limit: int, fields: str,
+    ) -> dict[str, Any]:
         """Search the user's Zotero library for papers by title, author, tag, or collection.
 
-        Returns matching items with metadata.
+        Choose `limit` and `fields` to fetch only what you need for the user's question.
+        For broad browsing questions (e.g. "what's in my library?"), use a small field set
+        like "title,creators,year" and a reasonable limit. For detailed lookups, include
+        more fields. Always request the minimum data needed to answer the question.
 
         Args:
             query: Search text matching title, creator, or year. Pass empty string to skip.
             tag: Filter by tag name. Pass empty string to skip.
             collection: Filter by collection key. Pass empty string to skip.
             author: Filter by author name. Pass empty string to skip.
+            limit: Maximum number of items to return (1-50). Use a small number for overview questions, larger for exhaustive searches.
+            fields: Comma-separated list of fields to include per item. Available fields: key, itemType, title, creators, date, year, DOI, abstractNote, publicationTitle, tags. Always include 'key'. Use fewer fields for broad queries.
         """
+        # Strip wildcards/whitespace so Gemini sending "*" or " " is treated
+        # the same as an empty string (i.e. no filter applied).
+        def _clean(val: str) -> str:
+            return val.strip().strip("*").strip()
+
         params: dict[str, Any] = {}
-        if query:
-            params["query"] = query
-        if tag:
-            params["tag"] = tag
-        if collection:
-            params["collection"] = collection
-        if author:
-            params["author"] = author
+        if _clean(query):
+            params["query"] = _clean(query)
+        if _clean(tag):
+            params["tag"] = _clean(tag)
+        if _clean(collection):
+            params["collection"] = _clean(collection)
+        if _clean(author):
+            params["author"] = _clean(author)
+        params["limit"] = max(1, min(limit, 50))
+        requested_fields: list[str] = [f.strip() for f in fields.split(",") if f.strip()]
+        if requested_fields:
+            params["fields"] = requested_fields
         return await _delegate_to_frontend(ws, "searchLibrary", params, ctx)
 
     async def create_note(parentItemKey: str, noteContent: str, tags: str) -> dict[str, Any]:
