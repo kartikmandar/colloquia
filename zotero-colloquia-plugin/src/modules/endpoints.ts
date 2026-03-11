@@ -42,7 +42,7 @@ function jsonResponse(
 // ---------------------------------------------------------------------------
 
 class PingEndpoint {
-  supportedMethods = ["POST"];
+  supportedMethods = ["GET", "POST"];
   supportedDataTypes = ["application/json"];
   permitBookmarklet = false;
 
@@ -844,7 +844,7 @@ class CreateCollectionEndpoint {
       }
 
       const collection = new Zotero.Collection();
-      collection.libraryID = Zotero.Libraries.userLibraryID;
+      (collection as any).libraryID = Zotero.Libraries.userLibraryID;
       collection.name = name;
 
       if (parentCollectionKey) {
@@ -1018,8 +1018,7 @@ class GetAnnotationsEndpoint {
       }
 
       // Get annotation children
-      const annotationIDs = attachmentItem.getAnnotations();
-      const annotationItems = await Zotero.Items.getAsync(annotationIDs);
+      const annotationItems: any[] = attachmentItem.getAnnotations();
 
       const annotations = annotationItems.map((ann: any) => {
         let position = {};

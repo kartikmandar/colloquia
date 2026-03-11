@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "highlight.js/styles/github-dark-dimmed.css";
 
 @theme {
   /* Surfaces */
@@ -43,4 +44,188 @@
   --shadow-panel: 0 1px 3px 0 rgb(0 0 0 / 0.3), 0 1px 2px -1px rgb(0 0 0 / 0.3);
   --shadow-overlay:
     0 20px 25px -5px rgb(0 0 0 / 0.4), 0 8px 10px -6px rgb(0 0 0 / 0.4);
+}
+
+/* ── Markdown Prose ── */
+.markdown-prose {
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.markdown-prose > *:first-child {
+  margin-top: 0;
+}
+
+.markdown-prose > *:last-child {
+  margin-bottom: 0;
+}
+
+/* Headings */
+.markdown-prose h1,
+.markdown-prose h2,
+.markdown-prose h3,
+.markdown-prose h4,
+.markdown-prose h5,
+.markdown-prose h6 {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.markdown-prose h1 { font-size: 1.25em; }
+.markdown-prose h2 { font-size: 1.15em; }
+.markdown-prose h3 { font-size: 1.05em; }
+
+/* Paragraphs */
+.markdown-prose p {
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+/* Links */
+.markdown-prose a {
+  color: var(--color-accent-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.markdown-prose a:hover {
+  color: var(--color-accent-primary-hover);
+}
+
+/* Lists */
+.markdown-prose ul {
+  list-style-type: disc;
+  padding-left: 1.5em;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-prose ol {
+  list-style-type: decimal;
+  padding-left: 1.5em;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-prose li {
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
+}
+
+.markdown-prose li > ul,
+.markdown-prose li > ol {
+  margin-top: 0.2em;
+  margin-bottom: 0.2em;
+}
+
+/* Inline code */
+.markdown-inline-code {
+  background-color: var(--color-surface-tertiary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 4px;
+  padding: 0.15em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.875em;
+}
+
+/* Code blocks */
+.markdown-code-block {
+  position: relative;
+  margin-top: 0.5em;
+  margin-bottom: 0.5em;
+}
+
+.markdown-code-block pre {
+  background-color: var(--color-surface-secondary) !important;
+  border: 1px solid var(--color-border-primary);
+  border-radius: 6px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.8125em;
+  line-height: 1.5;
+}
+
+.markdown-copy-btn {
+  position: absolute;
+  top: 0.4em;
+  right: 0.4em;
+  background-color: var(--color-surface-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-primary);
+  border-radius: 4px;
+  padding: 0.15em 0.5em;
+  font-size: 0.7em;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+}
+
+.markdown-code-block:hover .markdown-copy-btn {
+  opacity: 1;
+}
+
+.markdown-copy-btn:hover {
+  background-color: var(--color-surface-primary);
+}
+
+/* Blockquotes */
+.markdown-prose blockquote {
+  border-left: 3px solid var(--color-accent-primary);
+  padding-left: 0.75em;
+  margin: 0.5em 0;
+  color: var(--color-text-secondary);
+}
+
+/* Horizontal rule */
+.markdown-prose hr {
+  border: none;
+  border-top: 1px solid var(--color-border-primary);
+  margin: 1em 0;
+}
+
+/* Tables */
+.markdown-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.875em;
+}
+
+.markdown-prose th,
+.markdown-prose td {
+  border: 1px solid var(--color-border-primary);
+  padding: 0.4em 0.75em;
+  text-align: left;
+}
+
+.markdown-prose th {
+  background-color: var(--color-surface-secondary);
+  font-weight: 600;
+}
+
+.markdown-prose tr:nth-child(even) {
+  background-color: var(--color-surface-secondary);
+}
+
+/* Strong and emphasis */
+.markdown-prose strong {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.markdown-prose em {
+  font-style: italic;
+}
+
+/* Images */
+.markdown-prose img {
+  max-width: 100%;
+  border-radius: 6px;
 }

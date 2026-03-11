@@ -6,6 +6,7 @@ import { useState, useRef, useEffect } from "react";
 import type { ChatMessage } from "../hooks/useWebSocket";
 import ToolCallBadge from "./ToolCallBadge";
 import ThinkingStep from "./ThinkingStep";
+import MarkdownRenderer from "./MarkdownRenderer";
 
 function formatRelativeTime(timestamp: number): string {
   const seconds: number = Math.floor((Date.now() - timestamp) / 1000);
@@ -135,6 +136,8 @@ function ChatPanel({
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary [animation-delay:-0.15s]" />
                     <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary" />
                   </span>
+                ) : msg.role === "model" ? (
+                  <MarkdownRenderer content={msg.text} />
                 ) : (
                   <p className="whitespace-pre-wrap">{msg.text}</p>
                 )}

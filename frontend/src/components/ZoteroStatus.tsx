@@ -1,3 +1,4 @@
+import { useState, useRef, useEffect } from "react";
 import type { ZoteroState } from "../hooks/useZoteroHealth";
 
 interface ZoteroStatusProps {
@@ -8,7 +9,7 @@ interface ZoteroStatusProps {
 function Spinner(): React.ReactElement {
   return (
     <svg
-      className="h-4 w-4 animate-spin text-accent-primary"
+      className="h-3 w-3 animate-spin"
       xmlns="http://www.w3.org/2000/svg"
       fill="none"
       viewBox="0 0 24 24"
@@ -34,53 +35,93 @@ function ZoteroStatus({
   state,
   onRefresh,
 }: ZoteroStatusProps): React.ReactElement {
+  const [showDropdown, setShowDropdown] = useState<boolean>(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent): void {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowDropdown(false);
+      }
+    }
+    if (showDropdown) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showDropdown]);
+
   if (state.loading) {
     return (
-      <div className="flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
+      <div className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 dark:bg-blue-950 dark:text-blue-400">
         <Spinner />
-        <span>Checking Zotero connection...</span>
+        Checking Zotero...
       </div>
     );
   }
 
   if (!state.available) {
     return (
-      <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-300">
-        <h3 className="mb-2 font-semibold">Zotero Not Detected</h3>
-        <p className="mb-3">
-          Make sure Zotero 7 is running and API access is enabled.
-        </p>
-        <ol className="mb-4 list-inside list-decimal space-y-1 text-amber-700 dark:text-amber-400">
-          <li>Open Zotero 7</li>
-          <li>Go to Edit &gt; Settings &gt; Advanced</li>
-          <li>
-            Ensure &quot;Allow other applications to communicate with
-            Zotero&quot; is checked
-          </li>
-        </ol>
+      <div className="relative" ref={dropdownRef}>
         <button
-          onClick={onRefresh}
-          className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-amber-700"
+          onClick={() => setShowDropdown(!showDropdown)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-400 dark:hover:bg-amber-900"
         >
-          Retry
+          <span className="h-2 w-2 rounded-full bg-amber-500" />
+          Zotero Not Detected
         </button>
+        {showDropdown && (
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border-primary bg-surface-primary p-4 text-sm shadow-lg">
+            <p className="mb-3 text-text-secondary">
+              Make sure Zotero 7 is running with API access enabled.
+            </p>
+            <ol className="mb-3 list-inside list-decimal space-y-1 text-xs text-text-tertiary">
+              <li>Open Zotero 7</li>
+              <li>Edit &gt; Settings &gt; Advanced</li>
+              <li>Enable &quot;Allow other applications...&quot;</li>
+            </ol>
+            <button
+              onClick={() => {
+                onRefresh();
+                setShowDropdown(false);
+              }}
+              className="w-full rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-700"
+            >
+              Retry Connection
+            </button>
+          </div>
+        )}
       </div>
     );
   }
 
   if (!state.pluginInstalled) {
     return (
-      <div className="space-y-2">
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
-          <h3 className="mb-1 font-semibold">Colloquia Plugin Not Installed</h3>
-          <p className="mb-1">
-            Install the Colloquia plugin to enable library management features.
-          </p>
-          <p className="text-blue-600 dark:text-blue-400">
-            You can still browse your library without the plugin.
-          </p>
-        </div>
-        {state.libraryEmpty && <LibraryEmptyNote />}
+      <div className="relative" ref={dropdownRef}>
+        <button
+          onClick={() => setShowDropdown(!showDropdown)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+        >
+          <span className="h-2 w-2 rounded-full bg-blue-500" />
+          Plugin Missing
+        </button>
+        {showDropdown && (
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border-primary bg-surface-primary p-4 text-sm shadow-lg">
+            <p className="mb-1 font-medium text-text-primary">
+              Colloquia Plugin Not Installed
+            </p>
+            <p className="mb-1 text-xs text-text-secondary">
+              Install the plugin to enable library management.
+            </p>
+            <p className="text-xs text-text-tertiary">
+              You can still browse your library without it.
+            </p>
+            {state.libraryEmpty && (
+              <div className="mt-3 border-t border-border-primary pt-3">
+                <LibraryEmptyNote />
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   }
