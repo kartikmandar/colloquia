@@ -7,7 +7,6 @@ import {
   fetchItemDetails,
   fetchItemChildren,
   fetchItemFulltext,
-  formatAuthorsFull,
   extractYear,
   getVenue,
 } from "./zoteroApi";

@@ -328,32 +328,35 @@ def validate_annotation_coords(
     rects: list[list[float]],
     page_width: float,
     page_height: float,
-) -> bool:
+) -> tuple[bool, str]:
     """Validate that annotation coordinates are reasonable.
 
     Rejects:
     - All-zero coordinates
     - Coordinates outside page bounds
     - Extremely small annotations (< 5 points in either dimension)
+
+    Returns:
+        Tuple of (is_valid, error_message). error_message is empty if valid.
     """
     for rect in rects:
         if len(rect) != 4:
-            return False
+            return False, f"Expected 4 coordinates, got {len(rect)}"
 
         x1, y1, x2, y2 = rect
 
         # All zeros
         if all(v == 0.0 for v in rect):
-            return False
+            return False, "All coordinates are zero"
 
         # Outside page bounds (with small tolerance)
         tolerance: float = 1.0
         if (x1 < -tolerance or y1 < -tolerance or
                 x2 > page_width + tolerance or y2 > page_height + tolerance):
-            return False
+            return False, f"Coordinates outside page bounds ({page_width}x{page_height})"
 
         # Too small (< 5 PDF points ≈ 1.8mm)
         if abs(x2 - x1) < 5.0 or abs(y2 - y1) < 5.0:
-            return False
+            return False, "Annotation too small (< 5 PDF points)"
 
-    return True
+    return True, ""

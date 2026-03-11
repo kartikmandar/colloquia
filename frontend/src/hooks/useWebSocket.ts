@@ -6,6 +6,7 @@
  */
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import toast from "react-hot-toast";
 import { getGeminiKey, getS2Key } from "../lib/apiKeys";
 import { getFallbackUrl } from "../lib/backendUrl";
 import type {
@@ -37,6 +38,7 @@ export interface ChatMessage {
 interface UseWebSocketOptions {
   url: string;
   onAudioData?: (base64Pcm: string) => void;
+  onInterrupted?: () => void;
   autoConnect?: boolean;
 }
 
@@ -61,6 +63,7 @@ function nextMessageId(): string {
 export function useWebSocket({
   url,
   onAudioData,
+  onInterrupted,
   autoConnect = false,
 }: UseWebSocketOptions): UseWebSocketReturn {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
@@ -142,6 +145,7 @@ export function useWebSocket({
             : e instanceof Error
               ? e.message
               : "Unknown error calling Zotero plugin";
+        toast.error(errorMsg);
         sendZoteroActionResult(requestId, false, undefined, errorMsg);
       }
     },
@@ -160,6 +164,10 @@ export function useWebSocket({
       switch (data.type) {
         case "audio":
           onAudioData?.(data.data);
+          break;
+
+        case "interrupted":
+          onInterrupted?.();
           break;
 
         case "transcript": {
@@ -245,6 +253,18 @@ export function useWebSocket({
 
         case "tool_call": {
           const tc: ToolCallMessage = data;
+          // Show toast for tool errors
+          if (tc.status === "error") {
+            const errorMessages: Record<string, string> = {
+              search_academic_papers: "Paper search unavailable",
+              get_paper_recommendations: "Paper recommendations unavailable",
+              annotate_zotero_pdf: "Annotation placement failed",
+              deep_analysis: "Advanced analysis unavailable",
+              search_zotero_library: "Zotero search failed",
+            };
+            const friendlyMsg: string = errorMessages[tc.toolName] || `Tool failed: ${tc.toolName}`;
+            toast.error(tc.error ? `${friendlyMsg}: ${tc.error}` : friendlyMsg);
+          }
           setMessages((prev: ChatMessage[]) => {
             const updated: ChatMessage[] = [...prev];
             const lastModel: ChatMessage | undefined = [...updated]
@@ -287,6 +307,7 @@ export function useWebSocket({
           break;
 
         case "error":
+          toast.error(data.message || "An error occurred");
           addMessage("model", `Error: ${data.message}`, "text");
           break;
 
@@ -303,7 +324,7 @@ export function useWebSocket({
         }
       }
     },
-    [onAudioData, addMessage, handleZoteroAction]
+    [onAudioData, onInterrupted, addMessage, handleZoteroAction]
   );
 
   const connectToUrl = useCallback(
@@ -319,6 +340,9 @@ export function useWebSocket({
       wsRef.current = ws;
 
       ws.onopen = (): void => {
+        // Guard: ignore if this socket was replaced (e.g. StrictMode double-mount)
+        if (wsRef.current !== ws) return;
+
         reconnectAttemptRef.current = 0;
         triedFallbackRef.current = false;
 
@@ -340,9 +364,15 @@ export function useWebSocket({
         ws.send(JSON.stringify(configMsg));
       };
 
-      ws.onmessage = handleMessage;
+      ws.onmessage = (event: MessageEvent): void => {
+        // Guard: ignore messages from stale sockets
+        if (wsRef.current !== ws) return;
+        handleMessage(event);
+      };
 
       ws.onclose = (): void => {
+        // Guard: ignore close from stale sockets (prevents StrictMode cascade)
+        if (wsRef.current !== ws) return;
         wsRef.current = null;
         if (!intentionalCloseRef.current) {
           setStatus("reconnecting");

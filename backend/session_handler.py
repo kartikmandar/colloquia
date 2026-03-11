@@ -12,7 +12,7 @@ import time
 import uuid
 from typing import Any
 
-from fastapi import WebSocket
+from fastapi import WebSocket, WebSocketDisconnect
 from google import genai
 from google.genai import types
 
@@ -41,6 +41,7 @@ TOOL_REGISTRY: dict[str, Any] = {
     "echo": echo_tool,
     "search_academic_papers": search_academic_papers,
     "get_paper_recommendations": get_paper_recommendations,
+    "deep_analysis": deep_analysis,
 }
 
 TOOL_DECLARATIONS: list[types.FunctionDeclaration] = [
@@ -245,6 +246,81 @@ TOOL_DECLARATIONS: list[types.FunctionDeclaration] = [
         ),
     ),
     types.FunctionDeclaration(
+        name="deep_analysis",
+        description=(
+            "Perform deep, thorough analysis of paper content, methodology, or comparisons. "
+            "Delegates to a more powerful model for complex reasoning tasks. "
+            "Use when the user asks for critique, methodology review, or detailed comparison."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "query": types.Schema(
+                    type=types.Type.STRING,
+                    description="The specific analysis question or task",
+                ),
+                "context": types.Schema(
+                    type=types.Type.STRING,
+                    description="Relevant context from the conversation or paper content",
+                ),
+            },
+            required=["query", "context"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="manage_collection",
+        description=(
+            "Manage Zotero collections: list all collections, create a new collection, "
+            "add items to a collection, or remove items from a collection. "
+            "Always confirm with the user before modifying."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "action": types.Schema(
+                    type=types.Type.STRING,
+                    description="'list', 'create', 'addItems', or 'removeItems'",
+                ),
+                "name": types.Schema(
+                    type=types.Type.STRING,
+                    description="Collection name (for 'create' action)",
+                ),
+                "collectionKey": types.Schema(
+                    type=types.Type.STRING,
+                    description="Collection key (for addItems/removeItems)",
+                ),
+                "itemKeys": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.STRING),
+                    description="Item keys to add/remove (for addItems/removeItems)",
+                ),
+                "parentCollectionKey": types.Schema(
+                    type=types.Type.STRING,
+                    description="Parent collection key (for 'create' action, optional)",
+                ),
+            },
+            required=["action"],
+        ),
+    ),
+    types.FunctionDeclaration(
+        name="trash_items",
+        description=(
+            "Move Zotero items to the trash. This is recoverable — items can be restored from trash. "
+            "Always confirm with the user before trashing items."
+        ),
+        parameters=types.Schema(
+            type=types.Type.OBJECT,
+            properties={
+                "itemKeys": types.Schema(
+                    type=types.Type.ARRAY,
+                    items=types.Schema(type=types.Type.STRING),
+                    description="Zotero item keys to move to trash",
+                ),
+            },
+            required=["itemKeys"],
+        ),
+    ),
+    types.FunctionDeclaration(
         name="add_paper_to_zotero",
         description=(
             "Add a discovered paper to the user's Zotero library. "
@@ -296,6 +372,15 @@ ZOTERO_WRITE_TOOLS: set[str] = {
     "trash_items",
 }
 
+# Map Gemini tool names (snake_case) → Zotero plugin endpoint names (camelCase)
+ZOTERO_TOOL_TO_ENDPOINT: dict[str, str] = {
+    "search_zotero_library": "searchLibrary",
+    "create_note": "createNote",
+    "add_paper_to_zotero": "addPaper",
+    "link_related_items": "addRelated",
+    "trash_items": "trashItems",
+}
+
 # Per-session registry of pending Zotero write operations
 # Key: request_id, Value: asyncio.Future
 _pending_zotero: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -309,8 +394,22 @@ _page_dimensions: dict[int, dict[str, float]] = {}
 # LiveConnectConfig builder
 # ---------------------------------------------------------------------------
 
-def build_live_config(system_prompt: str | None = None) -> types.LiveConnectConfig:
-    """Build the LiveConnectConfig for a Gemini Live API session."""
+def build_live_config(
+    system_prompt: str | None = None,
+    resumption_handle: str | None = None,
+) -> types.LiveConnectConfig:
+    """Build the LiveConnectConfig for a Gemini Live API session.
+
+    Args:
+        system_prompt: Optional system prompt override (defaults to LOBBY_SYSTEM_PROMPT).
+        resumption_handle: Optional session resumption handle for reconnection.
+    """
+    session_resumption: types.SessionResumptionConfig = types.SessionResumptionConfig()
+    if resumption_handle:
+        session_resumption = types.SessionResumptionConfig(
+            handle=resumption_handle,
+        )
+
     return types.LiveConnectConfig(
         response_modalities=["AUDIO"],
         system_instruction=system_prompt or LOBBY_SYSTEM_PROMPT,
@@ -318,9 +417,17 @@ def build_live_config(system_prompt: str | None = None) -> types.LiveConnectConf
             types.Tool(function_declarations=TOOL_DECLARATIONS),
             types.Tool(google_search=types.GoogleSearch()),
         ],
-        session_resumption=types.SessionResumptionConfig(),
+        session_resumption=session_resumption,
         output_audio_transcription=types.AudioTranscriptionConfig(),
         input_audio_transcription=types.AudioTranscriptionConfig(),
+        realtime_input_config=types.RealtimeInputConfig(
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                disabled=False,
+                start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_HIGH,
+                silence_duration_ms=300,
+            ),
+        ),
     )
 
 
@@ -341,151 +448,220 @@ async def run_session(
     Connects to Gemini Live API and runs two concurrent tasks:
     - forward_user_to_gemini: reads from frontend WS, sends to Gemini
     - forward_gemini_to_user: reads from Gemini, handles tool calls, forwards to frontend
+
+    Supports session resumption: when a GoAway message is received from the
+    server, the session reconnects using the stored resumption handle, up to
+    ``max_reconnects`` times.
     """
     session_request_ids: set[str] = set()
     resumption_handle: str | None = None
     api_key: str = config_msg["gemini_api_key"]
     s2_api_key: str | None = config_msg.get("s2_api_key")
     conversation_state: ConversationState = ConversationState()
+    should_reconnect: bool = False
+    max_reconnects: int = 5
+    reconnect_count: int = 0
 
-    live_config: types.LiveConnectConfig = build_live_config()
-
-    async with client.aio.live.connect(
-        model=LIVE_MODEL, config=live_config
-    ) as session:
-        logger.info("Gemini Live session connected (model=%s)", LIVE_MODEL)
-
-        async def forward_user_to_gemini() -> None:
-            """Read from frontend WebSocket, send to Gemini Live session."""
-            while True:
-                raw_text: str = await ws.receive_text()
-                raw: dict[str, Any] = json.loads(raw_text)
-                msg_type: str = raw.get("type", "")
-
-                if msg_type == "audio":
-                    audio_bytes: bytes = base64.b64decode(raw["data"])
-                    await session.send_realtime_input(
-                        audio=types.Blob(
-                            data=audio_bytes,
-                            mime_type="audio/pcm;rate=16000",
-                        )
-                    )
-
-                elif msg_type == "text":
-                    text_content: str = raw.get("content", "")
-                    # Route text through the generateContent text handler
-                    await handle_text_message(
-                        ws, text_content, api_key, conversation_state
-                    )
-
-                elif msg_type == "paper_context":
-                    await handle_paper_load(ws, session, raw, conversation_state)
-
-                elif msg_type == "zotero_action_result":
-                    resolve_zotero_result(raw)
-
-                elif msg_type == "control":
-                    action: str = raw.get("action", "")
-                    logger.info("Control message: %s", action)
-                    if action == "switch_mode" and raw.get("mode") == "lobby":
-                        await handle_switch_to_lobby(session)
-                        _page_dimensions.clear()
-
-        async def forward_gemini_to_user() -> None:
-            """Read from Gemini Live session, handle tool calls, forward to frontend."""
-            nonlocal resumption_handle
-
-            async for message in session.receive():
-                # Audio data → forward to frontend
-                if message.data:
-                    encoded: str = base64.b64encode(message.data).decode()
-                    await ws.send_json({
-                        "type": "audio",
-                        "data": encoded,
-                    })
-
-                # Tool calls → execute and respond
-                if message.tool_call:
-                    await handle_tool_calls(
-                        ws, session, message.tool_call,
-                        session_request_ids, api_key,
-                        s2_api_key=s2_api_key,
-                    )
-
-                # Server content (transcripts, interruptions)
-                if message.server_content:
-                    sc: Any = message.server_content
-
-                    if hasattr(sc, "output_transcription") and sc.output_transcription:
-                        await ws.send_json({
-                            "type": "transcript",
-                            "role": "model",
-                            "text": sc.output_transcription.text,
-                            "isFinal": True,
-                        })
-
-                    if hasattr(sc, "input_transcription") and sc.input_transcription:
-                        await ws.send_json({
-                            "type": "transcript",
-                            "role": "user",
-                            "text": sc.input_transcription.text,
-                            "isFinal": True,
-                        })
-
-                    if hasattr(sc, "interrupted") and sc.interrupted:
-                        logger.info("Model output interrupted (barge-in)")
-
-                # Token usage → forward to frontend
-                if message.usage_metadata:
-                    total: int = getattr(
-                        message.usage_metadata, "total_token_count", 0
-                    )
-                    await ws.send_json({
-                        "type": "context_usage",
-                        "totalTokens": total,
-                        "maxTokens": 128000,
-                    })
-
-                # Session resumption handle
-                if hasattr(message, "session_resumption_update") and message.session_resumption_update:
-                    resumption_handle = getattr(
-                        message.session_resumption_update, "new_handle", None
-                    )
-                    if resumption_handle:
-                        logger.info("Session resumption handle received")
-
-                # GoAway — server about to disconnect
-                if hasattr(message, "go_away") and message.go_away:
-                    logger.warning("Received GoAway — session will disconnect soon")
-                    await ws.send_json({
-                        "type": "session_status",
-                        "status": "reconnecting",
-                    })
-
-        # Run both tasks concurrently
-        task_user: asyncio.Task[None] = asyncio.create_task(
-            forward_user_to_gemini()
+    while reconnect_count <= max_reconnects:
+        live_config: types.LiveConnectConfig = build_live_config(
+            resumption_handle=resumption_handle,
         )
-        task_gemini: asyncio.Task[None] = asyncio.create_task(
-            forward_gemini_to_user()
-        )
+
+        if resumption_handle:
+            logger.info(
+                "Reconnecting with resumption handle (attempt %d/%d)",
+                reconnect_count, max_reconnects,
+            )
+
+        should_reconnect = False
 
         try:
-            done, pending = await asyncio.wait(
-                [task_user, task_gemini],
-                return_when=asyncio.FIRST_COMPLETED,
+            async with client.aio.live.connect(
+                model=LIVE_MODEL, config=live_config
+            ) as session:
+                logger.info("Gemini Live session connected (model=%s)", LIVE_MODEL)
+
+                if reconnect_count > 0:
+                    await ws.send_json({
+                        "type": "session_status",
+                        "status": "connected",
+                    })
+
+                async def forward_user_to_gemini() -> None:
+                    """Read from frontend WebSocket, send to Gemini Live session."""
+                    try:
+                        while True:
+                            raw_text: str = await ws.receive_text()
+                            raw: dict[str, Any] = json.loads(raw_text)
+                            msg_type: str = raw.get("type", "")
+
+                            if msg_type == "audio":
+                                audio_bytes: bytes = base64.b64decode(raw["data"])
+                                await session.send_realtime_input(
+                                    audio=types.Blob(
+                                        data=audio_bytes,
+                                        mime_type="audio/pcm;rate=16000",
+                                    )
+                                )
+
+                            elif msg_type == "text":
+                                text_content: str = raw.get("content", "")
+                                # Route text through the generateContent text handler
+                                await handle_text_message(
+                                    ws, text_content, api_key, conversation_state
+                                )
+
+                            elif msg_type == "paper_context":
+                                await handle_paper_load(ws, session, raw, conversation_state)
+
+                            elif msg_type == "zotero_action_result":
+                                resolve_zotero_result(raw)
+
+                            elif msg_type == "control":
+                                action: str = raw.get("action", "")
+                                logger.info("Control message: %s", action)
+                                if action == "switch_mode" and raw.get("mode") == "lobby":
+                                    await handle_switch_to_lobby(session)
+                                    _page_dimensions.clear()
+                                elif action == "audio_stream_end":
+                                    await session.send_realtime_input(audio_stream_end=True)
+                                    logger.info("Sent audio_stream_end to flush cached audio")
+                    except WebSocketDisconnect:
+                        logger.info("Frontend WebSocket disconnected")
+                        return
+
+                async def forward_gemini_to_user() -> None:
+                    """Read from Gemini Live session, handle tool calls, forward to frontend."""
+                    nonlocal resumption_handle, should_reconnect
+
+                    async for message in session.receive():
+                        # Audio data -> forward to frontend
+                        if message.data:
+                            encoded: str = base64.b64encode(message.data).decode()
+                            await ws.send_json({
+                                "type": "audio",
+                                "data": encoded,
+                            })
+
+                        # Tool calls -> execute and respond
+                        if message.tool_call:
+                            await handle_tool_calls(
+                                ws, session, message.tool_call,
+                                session_request_ids, api_key,
+                                s2_api_key=s2_api_key,
+                                conversation_state=conversation_state,
+                            )
+
+                        # Server content (transcripts, interruptions)
+                        if message.server_content:
+                            sc: Any = message.server_content
+
+                            if hasattr(sc, "output_transcription") and sc.output_transcription:
+                                await ws.send_json({
+                                    "type": "transcript",
+                                    "role": "model",
+                                    "text": sc.output_transcription.text,
+                                    "isFinal": True,
+                                })
+                                conversation_state.add_message("assistant", sc.output_transcription.text)
+
+                            if hasattr(sc, "input_transcription") and sc.input_transcription:
+                                await ws.send_json({
+                                    "type": "transcript",
+                                    "role": "user",
+                                    "text": sc.input_transcription.text,
+                                    "isFinal": True,
+                                })
+                                conversation_state.add_message("user", sc.input_transcription.text)
+
+                            if hasattr(sc, "interrupted") and sc.interrupted:
+                                logger.info("Model output interrupted (barge-in)")
+                                await ws.send_json({"type": "interrupted"})
+
+                        # Token usage -> forward to frontend
+                        if message.usage_metadata:
+                            total: int = getattr(
+                                message.usage_metadata, "total_token_count", 0
+                            )
+                            await ws.send_json({
+                                "type": "context_usage",
+                                "totalTokens": total,
+                                "maxTokens": 128000,
+                            })
+
+                        # Session resumption handle
+                        if hasattr(message, "session_resumption_update") and message.session_resumption_update:
+                            resumption_handle = getattr(
+                                message.session_resumption_update, "new_handle", None
+                            )
+                            if resumption_handle:
+                                logger.info("Session resumption handle received")
+
+                        # GoAway — server about to disconnect
+                        if hasattr(message, "go_away") and message.go_away:
+                            logger.warning("Received GoAway — will reconnect with resumption handle")
+                            await ws.send_json({
+                                "type": "session_status",
+                                "status": "reconnecting",
+                            })
+                            if resumption_handle:
+                                should_reconnect = True
+                                return  # Exit the receive loop to trigger reconnection
+
+                # Run both tasks concurrently
+                task_user: asyncio.Task[None] = asyncio.create_task(
+                    forward_user_to_gemini()
+                )
+                task_gemini: asyncio.Task[None] = asyncio.create_task(
+                    forward_gemini_to_user()
+                )
+
+                try:
+                    done, pending = await asyncio.wait(
+                        [task_user, task_gemini],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for task in pending:
+                        task.cancel()
+                    for task in done:
+                        if task.exception():
+                            raise task.exception()  # type: ignore[misc]
+                    # If Gemini session ended normally (not GoAway) and we
+                    # have a resumption handle, auto-reconnect to preserve context
+                    if resumption_handle and not should_reconnect:
+                        if task_gemini in done and not task_gemini.exception():
+                            logger.info("Gemini session ended, reconnecting with resumption handle")
+                            should_reconnect = True
+                finally:
+                    if not should_reconnect:
+                        # Cleanup orphaned Zotero futures only on actual exit
+                        for rid in session_request_ids:
+                            future: asyncio.Future[dict[str, Any]] | None = _pending_zotero.pop(rid, None)
+                            if future and not future.done():
+                                future.cancel()
+
+        except Exception as e:
+            logger.error("Session error: %s", str(e))
+            if resumption_handle and reconnect_count < max_reconnects:
+                should_reconnect = True
+            else:
+                # Cleanup orphaned Zotero futures before raising
+                for rid in session_request_ids:
+                    future_cleanup: asyncio.Future[dict[str, Any]] | None = _pending_zotero.pop(rid, None)
+                    if future_cleanup and not future_cleanup.done():
+                        future_cleanup.cancel()
+                raise
+
+        if should_reconnect:
+            reconnect_count += 1
+            logger.info(
+                "Reconnecting in 1 second (attempt %d/%d)...",
+                reconnect_count, max_reconnects,
             )
-            for task in pending:
-                task.cancel()
-            for task in done:
-                if task.exception():
-                    raise task.exception()  # type: ignore[misc]
-        finally:
-            # Cleanup orphaned Zotero futures for this session
-            for rid in session_request_ids:
-                future: asyncio.Future[dict[str, Any]] | None = _pending_zotero.pop(rid, None)
-                if future and not future.done():
-                    future.cancel()
+            await asyncio.sleep(1)  # Brief pause before reconnect
+            continue
+        else:
+            break
 
 
 # ---------------------------------------------------------------------------
@@ -664,6 +840,7 @@ async def handle_tool_calls(
     session_request_ids: set[str],
     api_key: str,
     s2_api_key: str | None = None,
+    conversation_state: ConversationState | None = None,
 ) -> None:
     """Execute tool calls and send responses back to Gemini."""
     responses: list[types.FunctionResponse] = []
@@ -707,7 +884,7 @@ async def handle_tool_calls(
 
                 # Validate input bbox
                 is_valid, validation_msg = validate_annotation_coords(
-                    bbox, page_width, page_height
+                    [bbox], page_width, page_height
                 )
                 if not is_valid:
                     result = {"error": f"Invalid annotation coordinates: {validation_msg}"}
@@ -727,9 +904,39 @@ async def handle_tool_calls(
                         ws, "createAnnotation", annotation_params, session_request_ids
                     )
 
-            elif fc.name in ZOTERO_WRITE_TOOLS:
+            elif fc.name == "deep_analysis":
+                call_args = dict(fc.args)
+                call_args["api_key"] = api_key
+                result = await deep_analysis(**call_args)
+
+            elif fc.name == "manage_collection":
+                action_name: str = fc.args.get("action", "list")
+                action_map: dict[str, str] = {
+                    "list": "listCollections",
+                    "create": "createCollection",
+                    "addItems": "addToCollection",
+                    "removeItems": "removeFromCollection",
+                }
+                endpoint: str = action_map.get(action_name, "listCollections")
+                params: dict[str, Any] = {
+                    k: v for k, v in fc.args.items() if k != "action"
+                }
                 result = await delegate_to_frontend(
-                    ws, fc.name, fc.args, session_request_ids
+                    ws, endpoint, params, session_request_ids
+                )
+
+            elif fc.name == "manage_tags":
+                action_name = fc.args.get("action", "add")
+                endpoint = "addTags" if action_name == "add" else "removeTags"
+                params = {k: v for k, v in fc.args.items() if k != "action"}
+                result = await delegate_to_frontend(
+                    ws, endpoint, params, session_request_ids
+                )
+
+            elif fc.name in ZOTERO_WRITE_TOOLS:
+                endpoint = ZOTERO_TOOL_TO_ENDPOINT.get(fc.name, fc.name)
+                result = await delegate_to_frontend(
+                    ws, endpoint, fc.args, session_request_ids
                 )
 
             elif fc.name in TOOL_REGISTRY:
@@ -756,6 +963,12 @@ async def handle_tool_calls(
                 "durationMs": duration_ms,
             })
 
+            if conversation_state is not None:
+                conversation_state.add_tool_call(fc.name, dict(fc.args))
+                conversation_state.add_tool_result(
+                    fc.name, str(result)[:500], success=True
+                )
+
             responses.append(
                 types.FunctionResponse(
                     name=fc.name, id=fc.id, response=result
@@ -773,6 +986,12 @@ async def handle_tool_calls(
                 "error": str(e),
                 "durationMs": duration_ms,
             })
+
+            if conversation_state is not None:
+                conversation_state.add_tool_call(fc.name, dict(fc.args))
+                conversation_state.add_tool_result(
+                    fc.name, str(e)[:500], success=False
+                )
 
             responses.append(
                 types.FunctionResponse(

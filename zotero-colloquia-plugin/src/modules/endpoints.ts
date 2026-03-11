@@ -789,6 +789,308 @@ class TestAnnotationEndpoint {
 }
 
 // ---------------------------------------------------------------------------
+// Endpoint: GET /colloquia/listCollections
+// ---------------------------------------------------------------------------
+
+class ListCollectionsEndpoint {
+  supportedMethods = ["GET", "POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    _request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const collections = Zotero.Collections.getByLibrary(
+        Zotero.Libraries.userLibraryID,
+      );
+      const results = [];
+      for (const col of collections) {
+        results.push({
+          key: col.key,
+          name: col.name,
+          parentCollectionKey: col.parentKey || null,
+          itemCount: col.getChildItems(false).length,
+        });
+      }
+      return jsonResponse(200, { collections: results });
+    } catch (e: any) {
+      ztoolkit.log(`listCollections error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/createCollection
+// ---------------------------------------------------------------------------
+
+class CreateCollectionEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body = parseBody(request.data);
+      const { name, parentCollectionKey } = body;
+
+      if (!name) {
+        return jsonResponse(400, {
+          error: "Missing required field: name",
+        });
+      }
+
+      const collection = new Zotero.Collection();
+      collection.libraryID = Zotero.Libraries.userLibraryID;
+      collection.name = name;
+
+      if (parentCollectionKey) {
+        collection.parentKey = parentCollectionKey;
+      }
+
+      await collection.saveTx();
+
+      return jsonResponse(200, { collectionKey: collection.key });
+    } catch (e: any) {
+      ztoolkit.log(`createCollection error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/addToCollection
+// ---------------------------------------------------------------------------
+
+class AddToCollectionEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body = parseBody(request.data);
+      const { itemKeys, collectionKey } = body;
+
+      if (!Array.isArray(itemKeys) || !collectionKey) {
+        return jsonResponse(400, {
+          error: "Missing required fields: itemKeys[], collectionKey",
+        });
+      }
+
+      const collection = await Zotero.Collections.getByLibraryAndKeyAsync(
+        Zotero.Libraries.userLibraryID,
+        collectionKey,
+      );
+      if (!collection) {
+        return jsonResponse(404, {
+          error: `Collection not found: ${collectionKey}`,
+        });
+      }
+
+      let modified = 0;
+      for (const key of itemKeys) {
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(
+          Zotero.Libraries.userLibraryID,
+          key,
+        );
+        if (!item) continue;
+
+        collection.addItem(item.id);
+        modified++;
+      }
+
+      await collection.saveTx();
+
+      return jsonResponse(200, { modified });
+    } catch (e: any) {
+      ztoolkit.log(`addToCollection error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/removeFromCollection
+// ---------------------------------------------------------------------------
+
+class RemoveFromCollectionEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body = parseBody(request.data);
+      const { itemKeys, collectionKey } = body;
+
+      if (!Array.isArray(itemKeys) || !collectionKey) {
+        return jsonResponse(400, {
+          error: "Missing required fields: itemKeys[], collectionKey",
+        });
+      }
+
+      const collection = await Zotero.Collections.getByLibraryAndKeyAsync(
+        Zotero.Libraries.userLibraryID,
+        collectionKey,
+      );
+      if (!collection) {
+        return jsonResponse(404, {
+          error: `Collection not found: ${collectionKey}`,
+        });
+      }
+
+      let modified = 0;
+      for (const key of itemKeys) {
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(
+          Zotero.Libraries.userLibraryID,
+          key,
+        );
+        if (!item) continue;
+
+        collection.removeItem(item.id);
+        modified++;
+      }
+
+      await collection.saveTx();
+
+      return jsonResponse(200, { modified });
+    } catch (e: any) {
+      ztoolkit.log(`removeFromCollection error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/getAnnotations
+// ---------------------------------------------------------------------------
+
+class GetAnnotationsEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body = parseBody(request.data);
+      const { itemKey } = body;
+
+      if (!itemKey) {
+        return jsonResponse(400, {
+          error: "Missing required field: itemKey",
+        });
+      }
+
+      const parentItem = await Zotero.Items.getByLibraryAndKeyAsync(
+        Zotero.Libraries.userLibraryID,
+        itemKey,
+      );
+      if (!parentItem) {
+        return jsonResponse(404, {
+          error: `Item not found: ${itemKey}`,
+        });
+      }
+
+      // Find the PDF attachment
+      let attachmentItem = parentItem;
+      if (!parentItem.isAttachment()) {
+        const attachmentIDs = parentItem.getAttachments();
+        const attachments = await Zotero.Items.getAsync(attachmentIDs);
+        const pdfAttachment = attachments.find(
+          (a: any) => a.attachmentContentType === "application/pdf",
+        );
+        if (!pdfAttachment) {
+          return jsonResponse(404, {
+            error: "No PDF attachment found for this item.",
+          });
+        }
+        attachmentItem = pdfAttachment;
+      }
+
+      // Get annotation children
+      const annotationIDs = attachmentItem.getAnnotations();
+      const annotationItems = await Zotero.Items.getAsync(annotationIDs);
+
+      const annotations = annotationItems.map((ann: any) => {
+        let position = {};
+        try {
+          position = JSON.parse(ann.annotationPosition || "{}");
+        } catch {
+          // leave as empty object
+        }
+
+        return {
+          key: ann.key,
+          annotationType: ann.annotationType,
+          comment: ann.annotationComment || "",
+          color: ann.annotationColor || "",
+          pageLabel: ann.annotationPageLabel || "",
+          position,
+        };
+      });
+
+      return jsonResponse(200, { annotations });
+    } catch (e: any) {
+      ztoolkit.log(`getAnnotations error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/trashItems
+// ---------------------------------------------------------------------------
+
+class TrashItemsEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body = parseBody(request.data);
+      const { itemKeys } = body;
+
+      if (!Array.isArray(itemKeys)) {
+        return jsonResponse(400, {
+          error: "Missing required field: itemKeys[]",
+        });
+      }
+
+      let trashed = 0;
+      for (const key of itemKeys) {
+        const item = await Zotero.Items.getByLibraryAndKeyAsync(
+          Zotero.Libraries.userLibraryID,
+          key,
+        );
+        if (!item) continue;
+
+        item.deleted = true;
+        await item.saveTx();
+        trashed++;
+      }
+
+      return jsonResponse(200, { trashed });
+    } catch (e: any) {
+      ztoolkit.log(`trashItems error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -807,6 +1109,12 @@ export function registerEndpoints(): void {
     "/colloquia/addPaper": AddPaperEndpoint,
     "/colloquia/test-doi-import": TestDoiImportEndpoint,
     "/colloquia/test-annotation": TestAnnotationEndpoint,
+    "/colloquia/listCollections": ListCollectionsEndpoint,
+    "/colloquia/createCollection": CreateCollectionEndpoint,
+    "/colloquia/addToCollection": AddToCollectionEndpoint,
+    "/colloquia/removeFromCollection": RemoveFromCollectionEndpoint,
+    "/colloquia/getAnnotations": GetAnnotationsEndpoint,
+    "/colloquia/trashItems": TrashItemsEndpoint,
   };
 
   for (const [path, EndpointClass] of Object.entries(endpoints)) {

@@ -7,11 +7,13 @@ import { AudioStreamer } from "../lib/audio-streamer";
 import { resolveBackendUrl } from "../lib/backendUrl";
 import { loadPaper } from "../lib/paperLoader";
 import type { LoadPaperResult } from "../lib/paperLoader";
+import { Toaster } from "react-hot-toast";
 import ZoteroStatus from "../components/ZoteroStatus";
 import PaperBrowser from "../components/PaperBrowser";
 import ConnectionBadge from "../components/ConnectionBadge";
 import ChatPanel from "../components/ChatPanel";
 import MicButton from "../components/MicButton";
+import ContextUsageBar from "../components/ContextUsageBar";
 
 interface MainAppProps {
   onBackToSetup: () => void;
@@ -32,9 +34,11 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     : "";
   const { state: zoteroState, refresh: zoteroRefresh } = useZoteroHealth();
 
-  const [selectedPaperKey, setSelectedPaperKey] = useState<string | null>(null);
+  const [_selectedPaperKey, setSelectedPaperKey] = useState<string | null>(null);
   const [loadedPaperTitle, setLoadedPaperTitle] = useState<string | null>(null);
   const [paperLoading, setPaperLoading] = useState<boolean>(false);
+  const [chatMode, setChatMode] = useState<"voice" | "text">("voice");
+  const [sessionEnded, setSessionEnded] = useState<boolean>(false);
 
   // Audio playback context (24kHz for Gemini output)
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
@@ -46,6 +50,10 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     }
     return audioStreamerRef.current;
   }, []);
+
+  const handleInterrupted = useCallback((): void => {
+    getAudioStreamer().stop();
+  }, [getAudioStreamer]);
 
   const handleAudioFromServer = useCallback(
     (base64Pcm: string): void => {
@@ -64,6 +72,7 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
   const {
     status,
     messages,
+    contextUsage,
     activeUrl,
     connect,
     disconnect,
@@ -74,6 +83,8 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
   } = useWebSocket({
     url: wsUrl,
     onAudioData: handleAudioFromServer,
+    onInterrupted: handleInterrupted,
+    autoConnect: true,
   });
 
   const isConnected: boolean = status === "connected";
@@ -122,13 +133,15 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
   const handleMicToggle = useCallback(async (): Promise<void> => {
     if (isCapturing) {
       stopCapture();
+      // Signal Gemini to flush cached audio and process what it has
+      sendControl("audio_stream_end");
     } else {
       // Resume audio context for playback (requires user gesture)
       const streamer: AudioStreamer = getAudioStreamer();
       await streamer.resume();
       await startCapture();
     }
-  }, [isCapturing, startCapture, stopCapture, getAudioStreamer]);
+  }, [isCapturing, startCapture, stopCapture, getAudioStreamer, sendControl]);
 
   const handleConnect = useCallback((): void => {
     if (isConnected) {
@@ -142,8 +155,21 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
     }
   }, [isConnected, isCapturing, stopCapture, disconnect, connect]);
 
+  useEffect(() => {
+    if (status === "disconnected" && !sessionEnded) {
+      // Check if we were previously connected (messages exist)
+      if (messages.length > 0) {
+        setSessionEnded(true);
+      }
+    }
+    if (status === "connected") {
+      setSessionEnded(false);
+    }
+  }, [status, messages.length, sessionEnded]);
+
   return (
     <div className="flex h-screen flex-col">
+      <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
       {/* Top bar */}
       <header className="flex items-center justify-between border-b border-gray-200 bg-white px-6 py-3">
         <h1 className="text-lg font-bold text-gray-900">Colloquia</h1>
@@ -154,6 +180,12 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
             <span className="text-[10px] text-gray-400 max-w-32 truncate" title={activeUrl}>
               {activeUrl.includes("localhost") ? "local" : "cloud"}
             </span>
+          )}
+          {contextUsage && (
+            <ContextUsageBar
+              totalTokens={contextUsage.totalTokens}
+              maxTokens={contextUsage.maxTokens}
+            />
           )}
           <button
             onClick={handleConnect}
@@ -193,7 +225,7 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
       </header>
 
       {/* Main content — split layout */}
-      <main className="flex flex-1 overflow-hidden">
+      <main className="relative flex flex-1 overflow-hidden">
         {/* Left: Paper browser */}
         <div className="flex-1 overflow-hidden border-r border-gray-200 p-4">
           <PaperBrowser onPaperSelect={handlePaperSelect} onOpenDiscussion={handleOpenDiscussion} />
@@ -230,19 +262,55 @@ function MainApp({ onBackToSetup }: MainAppProps): React.ReactElement {
               messages={messages}
               onSendText={sendText}
               isConnected={isConnected}
+              showTextInput={chatMode === "text"}
             />
           </div>
 
-          {/* Mic button area */}
-          <div className="flex items-center justify-center border-t border-gray-200 py-4">
-            <MicButton
-              isCapturing={isCapturing}
-              isConnected={isConnected}
-              volume={volume}
-              onToggle={handleMicToggle}
-            />
+          {/* Input area */}
+          <div className="flex items-center gap-2 border-t border-gray-200 px-3 py-3">
+            <button
+              onClick={() => setChatMode(chatMode === "voice" ? "text" : "voice")}
+              className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100"
+              title={chatMode === "voice" ? "Switch to text mode" : "Switch to voice mode"}
+            >
+              {chatMode === "voice" ? (
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z" clipRule="evenodd" />
+                </svg>
+              ) : (
+                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z" clipRule="evenodd" />
+                </svg>
+              )}
+            </button>
+            {chatMode === "voice" ? (
+              <div className="flex flex-1 justify-center">
+                <MicButton
+                  isCapturing={isCapturing}
+                  isConnected={isConnected}
+                  volume={volume}
+                  onToggle={handleMicToggle}
+                />
+              </div>
+            ) : null}
           </div>
         </div>
+        {sessionEnded && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="rounded-xl bg-white p-6 shadow-xl text-center max-w-sm">
+              <h2 className="text-lg font-semibold text-gray-900 mb-2">Session Ended</h2>
+              <p className="text-sm text-gray-600 mb-4">
+                The connection was lost. Your chat history is preserved.
+              </p>
+              <button
+                onClick={() => { setSessionEnded(false); connect(); }}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
+              >
+                Start New Session
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

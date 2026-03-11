@@ -182,6 +182,11 @@ export interface SessionStatusMessage {
   status: "connected" | "reconnecting" | "ended";
 }
 
+/** Barge-in: model output was interrupted by user speech */
+export interface InterruptedMessage {
+  type: "interrupted";
+}
+
 export type ServerMessage =
   | ServerAudioMessage
   | TranscriptMessage
@@ -194,4 +199,5 @@ export type ServerMessage =
   | ThinkingMessage
   | ContextUsageMessage
   | ErrorMessage
-  | SessionStatusMessage;
+  | SessionStatusMessage
+  | InterruptedMessage;
