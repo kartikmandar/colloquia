@@ -19,7 +19,8 @@ from agent_factory import SessionBundle, create_session_bundle
 from config import MAX_RECONNECTS, TEXT_MODEL, TEXT_MODEL_FALLBACK
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
-from tools.zotero_tools import resolve_zotero_result
+from tools.local_tools import search_academic_papers, get_paper_recommendations
+from tools.zotero_tools import create_zotero_tools, resolve_zotero_result
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ async def run_session(
 
             # Build run config with audio settings
             run_config: RunConfig = RunConfig(
-                response_modalities=["AUDIO"],
+                response_modalities=[types.Modality.AUDIO],
                 output_audio_transcription=types.AudioTranscriptionConfig(),
                 input_audio_transcription=types.AudioTranscriptionConfig(),
                 realtime_input_config=types.RealtimeInputConfig(
@@ -454,7 +455,8 @@ async def handle_text_message(
     """Handle a text chat message via streaming generateContent API.
 
     Uses the raw genai SDK since the live audio model doesn't support
-    generateContent. Reads session state for mode-appropriate system prompt.
+    generateContent. Registers tools so Gemini can call Zotero, Semantic
+    Scholar, etc. Handles multi-turn function calling automatically.
     """
     from google import genai
 
@@ -475,46 +477,123 @@ async def handle_text_message(
                 f"You are currently discussing the paper: {paper_ctx.get('title', 'Unknown')} "
                 f"by {paper_ctx.get('authors', 'Unknown')} ({paper_ctx.get('year', '')}).\n"
                 f"Provide helpful, precise responses in markdown format. "
-                f"When deep analysis is needed, say so explicitly."
+                f"When deep analysis is needed, say so explicitly.\n\n"
+                f"## Tools Available\n"
+                f"- search_zotero_library — search the user's Zotero library\n"
+                f"- search_academic_papers — search Semantic Scholar\n"
+                f"- add_paper_to_zotero — add a paper (confirm first)\n"
+                f"- get_paper_recommendations — find similar papers\n"
+                f"- manage_tags, manage_collection — organize the library\n"
+                f"- create_note — save notes to Zotero items\n"
+                f"Use tools proactively when the user asks about their library or papers."
             )
         else:
-            system_instruction = (
-                "You are Colloquia, an AI research assistant for managing "
-                "and discussing academic papers in Zotero. "
-                "Respond helpfully in markdown format."
-            )
+            system_instruction = LOBBY_SYSTEM_PROMPT
 
-        # Simple context: just the current message
-        context_contents: list[dict[str, Any]] = [
-            {"role": "user", "parts": [{"text": content}]},
+        # --- Build tool functions and lookup map ---
+        zotero_tool_funcs: list[Any] = create_zotero_tools(ws, bundle.zotero_ctx)
+        local_tool_funcs: list[Any] = [search_academic_papers, get_paper_recommendations]
+        all_tool_funcs: list[Any] = zotero_tool_funcs + local_tool_funcs
+        tool_map: dict[str, Any] = {func.__name__: func for func in all_tool_funcs}
+
+        # Conversation history for multi-turn function calling
+        context_contents: list[Any] = [
+            genai.types.Content(
+                role="user",
+                parts=[genai.types.Part.from_text(text=content)],
+            ),
         ]
 
         full_text: str = ""
         used_model: str = TEXT_MODEL
+        max_tool_turns: int = 5
 
         for model_name in (TEXT_MODEL, TEXT_MODEL_FALLBACK):
             try:
                 logger.info("Trying text model: %s", model_name)
-                stream = await client.aio.models.generate_content_stream(
-                    model=model_name,
-                    contents=context_contents,
-                    config=genai.types.GenerateContentConfig(
-                        system_instruction=system_instruction,
-                        temperature=0.7,
-                        max_output_tokens=2048,
-                    ),
-                )
                 used_model = model_name
-                async for chunk in stream:
-                    chunk_text: str = chunk.text or ""
-                    if chunk_text:
-                        full_text += chunk_text
+
+                for _turn in range(max_tool_turns):
+                    response_parts: list[Any] = []
+                    function_calls: list[Any] = []
+                    turn_text: str = ""
+
+                    stream = await client.aio.models.generate_content_stream(
+                        model=model_name,
+                        contents=context_contents,
+                        config=genai.types.GenerateContentConfig(
+                            system_instruction=system_instruction,
+                            temperature=0.7,
+                            max_output_tokens=2048,
+                            tools=all_tool_funcs,
+                            automatic_function_calling=genai.types.AutomaticFunctionCallingConfig(
+                                disable=True,
+                            ),
+                        ),
+                    )
+
+                    async for chunk in stream:
+                        if not chunk.candidates:
+                            continue
+                        for part in chunk.candidates[0].content.parts:
+                            response_parts.append(part)
+                            if part.function_call:
+                                function_calls.append(part.function_call)
+                            elif part.text:
+                                turn_text += part.text
+                                full_text += part.text
+                                await ws.send_json({
+                                    "type": "text_response_chunk",
+                                    "content": part.text,
+                                    "model": model_name,
+                                })
+
+                    # If no function calls, we're done
+                    if not function_calls:
+                        break
+
+                    # Append model response (with function call parts) to history
+                    context_contents.append(
+                        genai.types.Content(role="model", parts=response_parts)
+                    )
+
+                    # Execute each function call and collect results
+                    function_response_parts: list[Any] = []
+                    for fc in function_calls:
+                        fn_name: str = fc.name
+                        fn_args: dict[str, Any] = dict(fc.args) if fc.args else {}
+                        logger.info("Text mode tool call: %s(%s)", fn_name, fn_args)
+
+                        # Notify frontend about the tool call
                         await ws.send_json({
-                            "type": "text_response_chunk",
-                            "content": chunk_text,
-                            "model": model_name,
+                            "type": "tool_call",
+                            "name": fn_name,
+                            "args": fn_args,
                         })
-                break
+
+                        try:
+                            fn_callable = tool_map.get(fn_name)
+                            if fn_callable is None:
+                                result: dict[str, Any] = {"error": f"Unknown tool: {fn_name}"}
+                            else:
+                                result = await fn_callable(**fn_args)
+                        except Exception as tool_err:
+                            logger.warning("Tool %s failed: %s", fn_name, str(tool_err))
+                            result = {"error": str(tool_err)}
+
+                        function_response_parts.append(
+                            genai.types.Part.from_function_response(
+                                name=fn_name,
+                                response=result if isinstance(result, dict) else {"result": result},
+                            )
+                        )
+
+                    # Append function results as a user turn
+                    context_contents.append(
+                        genai.types.Content(role="user", parts=function_response_parts)
+                    )
+
+                break  # Model succeeded, don't try fallback
             except Exception as model_err:
                 logger.warning(
                     "Text model %s failed: %s: %s",

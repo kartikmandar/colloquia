@@ -14,17 +14,17 @@ interface ToolCallBadgeProps {
 }
 
 function getToolIcon(toolName: string): string {
-  if (toolName.includes("deep_analysis")) return "\u2699\uFE0F";
-  if (toolName.includes("search")) return "\uD83D\uDD0D";
-  if (toolName.includes("annotate")) return "\u270F\uFE0F";
-  if (toolName.includes("google")) return "\uD83C\uDF10";
-  return "\uD83D\uDD27";
+  if (toolName.includes("deep_analysis")) return "[analysis]";
+  if (toolName.includes("search")) return "[search]";
+  if (toolName.includes("annotate")) return "[annotate]";
+  if (toolName.includes("google")) return "[web]";
+  return "[tool]";
 }
 
 function getStatusIndicator(status: "calling" | "done" | "error"): string {
-  if (status === "calling") return "\u23F3";
-  if (status === "done") return "\u2705";
-  return "\u274C";
+  if (status === "calling") return "...";
+  if (status === "done") return "[ok]";
+  return "[err]";
 }
 
 function formatDuration(ms: number | undefined): string {

@@ -43,7 +43,7 @@ async def test_prompt_swap() -> None:
     model: str = "gemini-2.5-flash-native-audio-latest"
 
     live_config: types.LiveConnectConfig = types.LiveConnectConfig(
-        response_modalities=["AUDIO"],
+        response_modalities=[types.Modality.AUDIO],
         system_instruction=LOBBY_SYSTEM_PROMPT,
         output_audio_transcription=types.AudioTranscriptionConfig(),
         input_audio_transcription=types.AudioTranscriptionConfig(),
@@ -131,9 +131,9 @@ async def test_prompt_swap() -> None:
         # Verify
         success: bool = "test paper" in response_text.lower() or "smith" in response_text.lower()
         if success:
-            print("\n✅ PASS: Mid-session prompt swap works! Model references paper metadata.")
+            print("\nPASS: Mid-session prompt swap works! Model references paper metadata.")
         else:
-            print("\n⚠️  UNCERTAIN: Model response didn't clearly reference the paper.")
+            print("\nUNCERTAIN: Model response didn't clearly reference the paper.")
             print("   This may need the fallback approach (send as user turn).")
             print(f"   Full response: {response_text}")
 

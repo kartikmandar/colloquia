@@ -77,7 +77,7 @@ def create_colloquia_agent(
         instruction=_dynamic_instruction,
         tools=all_tools,
         generate_content_config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
+            response_modalities=[types.Modality.AUDIO],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(

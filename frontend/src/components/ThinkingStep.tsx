@@ -29,7 +29,7 @@ function ThinkingStep({
         onClick={(): void => setExpanded(!expanded)}
         className="flex items-center gap-1.5 rounded-lg bg-purple-50 px-2 py-1 text-xs text-purple-600 transition-colors hover:bg-purple-100 dark:bg-purple-950 dark:text-purple-400 dark:hover:bg-purple-900"
       >
-        <span>{"\uD83D\uDCAD"}</span>
+        <span>{"[thought]"}</span>
         <span className="font-medium">Thinking...</span>
         {duration && (
           <span className="text-purple-400 dark:text-purple-500">
