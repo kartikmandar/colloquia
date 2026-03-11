@@ -17,7 +17,7 @@ from google.genai import types
 
 from agent_factory import SessionBundle, create_session_bundle
 from config import MAX_HISTORY_TURNS, MAX_RECONNECTS, TEXT_MODEL, TEXT_MODEL_FALLBACK
-from model_registry import MODEL_REGISTRY, get_registry_json
+from model_registry import MODEL_REGISTRY, get_registry_json, ModelEntry
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
 from tools.local_tools import search_academic_papers, get_paper_recommendations
@@ -129,12 +129,28 @@ async def run_session(
                             # Cancel any in-progress text generation
                             if bundle.text_generation_task and not bundle.text_generation_task.done():
                                 bundle.text_generation_task.cancel()
-                            # Run as task so the receive loop stays free to
-                            # process zotero_action_result messages (avoids
-                            # deadlock when tools delegate to frontend).
-                            bundle.text_generation_task = asyncio.create_task(
-                                handle_text_message(ws, bundle, text_content, api_key)
-                            )
+
+                            # Route by API pattern
+                            registry_entry: ModelEntry | None = MODEL_REGISTRY.get(bundle.current_text_model)
+                            api_pattern: str = registry_entry.capabilities.api_pattern if registry_entry else "generateContent"
+
+                            if api_pattern == "predict":
+                                bundle.text_generation_task = asyncio.create_task(
+                                    handle_imagen_request(ws, bundle, text_content, api_key, bundle.current_text_model)
+                                )
+                            elif api_pattern == "predictLongRunning":
+                                bundle.text_generation_task = asyncio.create_task(
+                                    handle_veo_request(ws, bundle, text_content, api_key, bundle.current_text_model)
+                                )
+                            elif api_pattern == "tts":
+                                bundle.text_generation_task = asyncio.create_task(
+                                    handle_tts_request(ws, bundle, text_content, api_key, bundle.current_text_model)
+                                )
+                            else:
+                                # generateContent (text, multimodal, image_gen, open, research)
+                                bundle.text_generation_task = asyncio.create_task(
+                                    handle_text_message(ws, bundle, text_content, api_key)
+                                )
 
                         elif msg_type == "paper_context":
                             await handle_paper_load(
@@ -627,11 +643,25 @@ async def handle_text_message(
             else:
                 system_instruction = LOBBY_SYSTEM_PROMPT
 
-            # --- Build tool functions and lookup map ---
-            zotero_tool_funcs: list[Any] = create_zotero_tools(ws, bundle.zotero_ctx)
-            local_tool_funcs: list[Any] = [search_academic_papers, get_paper_recommendations]
-            all_tool_funcs: list[Any] = zotero_tool_funcs + local_tool_funcs
-            tool_map: dict[str, Any] = {func.__name__: func for func in all_tool_funcs}
+            # --- Build tool functions and lookup map (only if model supports tools) ---
+            registry_entry_text: ModelEntry | None = MODEL_REGISTRY.get(bundle.current_text_model)
+            model_supports_tools: bool = (
+                registry_entry_text is not None and registry_entry_text.capabilities.supports_tools
+            )
+
+            all_tool_funcs: list[Any] = []
+            tool_map: dict[str, Any] = {}
+            if model_supports_tools:
+                zotero_tool_funcs: list[Any] = create_zotero_tools(ws, bundle.zotero_ctx)
+                local_tool_funcs: list[Any] = [search_academic_papers, get_paper_recommendations]
+                all_tool_funcs = zotero_tool_funcs + local_tool_funcs
+                tool_map = {func.__name__: func for func in all_tool_funcs}
+            else:
+                # Append a note to system instruction that tools are unavailable
+                system_instruction += (
+                    "\n\nNote: Tool integrations (Zotero, Semantic Scholar) are not available "
+                    "with this model. Respond based on your knowledge only."
+                )
 
             # Build new user message
             new_user_msg: genai.types.Content = genai.types.Content(
@@ -662,18 +692,21 @@ async def handle_text_message(
                         function_calls: list[Any] = []
                         turn_text: str = ""
 
+                        config_kwargs: dict[str, Any] = {
+                            "system_instruction": system_instruction,
+                            "temperature": 0.7,
+                            "max_output_tokens": 2048,
+                        }
+                        if model_supports_tools and all_tool_funcs:
+                            config_kwargs["tools"] = all_tool_funcs
+                            config_kwargs["automatic_function_calling"] = (
+                                genai.types.AutomaticFunctionCallingConfig(disable=True)
+                            )
+
                         stream = await client.aio.models.generate_content_stream(
                             model=model_name,
                             contents=context_contents,
-                            config=genai.types.GenerateContentConfig(
-                                system_instruction=system_instruction,
-                                temperature=0.7,
-                                max_output_tokens=2048,
-                                tools=all_tool_funcs,
-                                automatic_function_calling=genai.types.AutomaticFunctionCallingConfig(
-                                    disable=True,
-                                ),
-                            ),
+                            config=genai.types.GenerateContentConfig(**config_kwargs),
                         )
 
                         async for chunk in stream:
@@ -870,3 +903,229 @@ async def handle_text_message(
                 })
             except Exception:
                 logger.warning("Could not send error to frontend — WebSocket already closed")
+
+
+# ---------------------------------------------------------------------------
+# Imagen handler (predict API)
+# ---------------------------------------------------------------------------
+
+async def handle_imagen_request(
+    ws: WebSocket,
+    bundle: SessionBundle,
+    prompt: str,
+    api_key: str,
+    model_name: str,
+) -> None:
+    """Handle image generation via the Imagen predict API."""
+    from google import genai
+
+    await ws.send_json({"type": "text_response_start"})
+    await ws.send_json({"type": "media_generating", "mediaType": "image"})
+
+    try:
+        client: genai.Client = genai.Client(
+            api_key=api_key,
+            http_options={"timeout": 60000},
+        )
+
+        response = await client.aio.models.generate_images(
+            model=model_name,
+            prompt=prompt,
+            config=genai.types.GenerateImagesConfig(
+                number_of_images=1,
+            ),
+        )
+
+        if response.generated_images:
+            for img in response.generated_images:
+                encoded: str = base64.b64encode(img.image.image_bytes).decode()
+                await ws.send_json({
+                    "type": "image_response",
+                    "data": encoded,
+                    "mimeType": "image/png",
+                    "model": model_name,
+                })
+        else:
+            await ws.send_json({
+                "type": "text_response_chunk",
+                "content": "No image was generated. Try a different prompt.",
+                "model": model_name,
+            })
+
+        await ws.send_json({"type": "text_response_done", "model": model_name})
+
+    except Exception as e:
+        logger.error("Imagen request failed: %s", str(e))
+        try:
+            await ws.send_json({
+                "type": "error",
+                "message": f"Image generation failed: {str(e)}",
+            })
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Veo handler (predictLongRunning API)
+# ---------------------------------------------------------------------------
+
+async def handle_veo_request(
+    ws: WebSocket,
+    bundle: SessionBundle,
+    prompt: str,
+    api_key: str,
+    model_name: str,
+) -> None:
+    """Handle video generation via the Veo predictLongRunning API."""
+    from google import genai
+
+    await ws.send_json({"type": "text_response_start"})
+    await ws.send_json({"type": "media_generating", "mediaType": "video"})
+    await ws.send_json({
+        "type": "text_response_chunk",
+        "content": "Generating video... this may take 30-120 seconds.",
+        "model": model_name,
+    })
+
+    try:
+        client: genai.Client = genai.Client(
+            api_key=api_key,
+            http_options={"timeout": 300000},
+        )
+
+        operation = await client.aio.models.generate_videos(
+            model=model_name,
+            prompt=prompt,
+        )
+
+        # Poll until done
+        max_polls: int = 60
+        for poll_num in range(max_polls):
+            if operation.done:
+                break
+            await asyncio.sleep(5)
+            operation = await client.aio.operations.get(operation)
+
+            if poll_num > 0 and poll_num % 6 == 0:
+                await ws.send_json({
+                    "type": "text_response_chunk",
+                    "content": f"\nStill generating... ({poll_num * 5}s elapsed)",
+                    "model": model_name,
+                })
+
+        if not operation.done:
+            await ws.send_json({
+                "type": "error",
+                "message": "Video generation timed out after 5 minutes.",
+            })
+            return
+
+        # Extract video from response
+        if hasattr(operation, 'response') and operation.response:
+            response = operation.response
+            generated_videos = getattr(response, 'generated_videos', None)
+            if generated_videos:
+                for vid in generated_videos:
+                    video_data = getattr(vid, 'video', None)
+                    if video_data and hasattr(video_data, 'video_bytes') and video_data.video_bytes:
+                        encoded_vid: str = base64.b64encode(video_data.video_bytes).decode()
+                        await ws.send_json({
+                            "type": "video_response",
+                            "data": encoded_vid,
+                            "mimeType": "video/mp4",
+                            "model": model_name,
+                        })
+                    elif video_data and hasattr(video_data, 'uri') and video_data.uri:
+                        await ws.send_json({
+                            "type": "text_response_chunk",
+                            "content": f"\nVideo generated: {video_data.uri}",
+                            "model": model_name,
+                        })
+            else:
+                await ws.send_json({
+                    "type": "text_response_chunk",
+                    "content": "\nNo video was generated. Try a different prompt.",
+                    "model": model_name,
+                })
+        else:
+            await ws.send_json({
+                "type": "text_response_chunk",
+                "content": "\nVideo generation completed but no output was returned.",
+                "model": model_name,
+            })
+
+        await ws.send_json({"type": "text_response_done", "model": model_name})
+
+    except Exception as e:
+        logger.error("Veo request failed: %s", str(e))
+        try:
+            await ws.send_json({
+                "type": "error",
+                "message": f"Video generation failed: {str(e)}",
+            })
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# TTS handler (generateContent with audio output)
+# ---------------------------------------------------------------------------
+
+async def handle_tts_request(
+    ws: WebSocket,
+    bundle: SessionBundle,
+    text: str,
+    api_key: str,
+    model_name: str,
+) -> None:
+    """Handle text-to-speech via generateContent with audio response modality."""
+    from google import genai
+
+    await ws.send_json({"type": "text_response_start"})
+
+    try:
+        client: genai.Client = genai.Client(
+            api_key=api_key,
+            http_options={"timeout": 60000},
+        )
+
+        response = await client.aio.models.generate_content(
+            model=model_name,
+            contents=text,
+            config=genai.types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=genai.types.SpeechConfig(
+                    voice_config=genai.types.VoiceConfig(
+                        prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
+                            voice_name="Kore",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        if response.candidates:
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, 'inline_data') and part.inline_data and part.inline_data.data:
+                    encoded_audio: str = base64.b64encode(part.inline_data.data).decode()
+                    await ws.send_json({
+                        "type": "audio",
+                        "data": encoded_audio,
+                    })
+
+        await ws.send_json({
+            "type": "text_response_chunk",
+            "content": f"[Audio generated from: \"{text[:100]}{'...' if len(text) > 100 else ''}\"]",
+            "model": model_name,
+        })
+        await ws.send_json({"type": "text_response_done", "model": model_name})
+
+    except Exception as e:
+        logger.error("TTS request failed: %s", str(e))
+        try:
+            await ws.send_json({
+                "type": "error",
+                "message": f"Text-to-speech failed: {str(e)}",
+            })
+        except Exception:
+            pass

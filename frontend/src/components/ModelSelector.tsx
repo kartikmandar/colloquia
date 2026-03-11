@@ -1,5 +1,5 @@
 /**
- * ModelSelector — dropdown for switching AI models with capability badges.
+ * ModelSelector — dropdown for switching AI models with capability badges and categorized sections.
  */
 
 import { useState, useRef, useEffect } from "react";
@@ -16,13 +16,21 @@ interface ModelSelectorProps {
 /** Short capability pill badges */
 function CapabilityBadges({ model }: { model: ModelInfo }): React.ReactElement {
   const caps = model.capabilities;
-  const pills: { label: string; active: boolean }[] = [
+  const pills: { label: string; active: boolean; color?: string }[] = [
+    { label: "Tools", active: caps.supportsTools, color: "green" },
     { label: "Text", active: caps.supportsText },
     { label: "Image", active: caps.supportsImageOutput },
     { label: "Video", active: caps.supportsVideoOutput },
     { label: "Audio", active: caps.supportsAudioOutput },
     { label: "Thinking", active: caps.supportsThinking },
   ];
+
+  const colorClasses: Record<string, string> = {
+    blue: "bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300",
+    green: "bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300",
+    amber: "bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300",
+    red: "bg-red-100 text-red-600 dark:bg-red-900 dark:text-red-300",
+  };
 
   return (
     <div className="flex flex-wrap gap-1 mt-0.5">
@@ -31,22 +39,75 @@ function CapabilityBadges({ model }: { model: ModelInfo }): React.ReactElement {
         .map((p) => (
           <span
             key={p.label}
-            className="inline-block rounded-full bg-blue-100 px-1.5 py-0 text-[10px] font-medium text-blue-700 dark:bg-blue-900 dark:text-blue-300"
+            className={`inline-block rounded-full px-1.5 py-0 text-[10px] font-medium ${
+              colorClasses[p.color ?? "blue"]
+            }`}
           >
             {p.label}
           </span>
         ))}
-      {model.capabilities.category === "image_only" && (
-        <span className="inline-block rounded-full bg-amber-100 px-1.5 py-0 text-[10px] font-medium text-amber-700 dark:bg-amber-900 dark:text-amber-300">
-          Image Only
+      {!caps.supportsTools && caps.supportsText && (
+        <span className={`inline-block rounded-full px-1.5 py-0 text-[10px] font-medium ${colorClasses.amber}`}>
+          No Tools
         </span>
       )}
       {model.unstable && (
-        <span className="inline-block rounded-full bg-red-100 px-1.5 py-0 text-[10px] font-medium text-red-600 dark:bg-red-900 dark:text-red-300">
+        <span className={`inline-block rounded-full px-1.5 py-0 text-[10px] font-medium ${colorClasses.red}`}>
           Unstable
         </span>
       )}
     </div>
+  );
+}
+
+interface ModelSectionProps {
+  title: string;
+  models: ModelInfo[];
+  currentModelId: string;
+  onSelect: (modelId: string) => void;
+}
+
+function ModelSection({ title, models, currentModelId, onSelect }: ModelSectionProps): React.ReactElement | null {
+  if (models.length === 0) return null;
+
+  return (
+    <>
+      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary mt-1 first:mt-0">
+        {title}
+      </div>
+      {models.map((model) => (
+        <button
+          key={model.modelId}
+          onClick={() => onSelect(model.modelId)}
+          className={`w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-tertiary ${
+            model.modelId === currentModelId ? "bg-surface-tertiary" : ""
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-text-primary">
+              {model.displayName}
+            </span>
+            {model.modelId === currentModelId && (
+              <svg
+                className="h-3 w-3 text-accent-primary"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            )}
+          </div>
+          <p className="text-[10px] text-text-tertiary mt-0.5">
+            {model.capabilities.description}
+          </p>
+          <CapabilityBadges model={model} />
+        </button>
+      ))}
+    </>
   );
 }
 
@@ -77,16 +138,27 @@ function ModelSelector({
 
   if (!modelList) return <></>;
 
-  const models: ModelInfo[] =
-    currentMode === "voice" ? modelList.voiceModels : modelList.textModels;
+  // Find current model across all categories
+  const allNonVoiceModels: ModelInfo[] = [
+    ...(modelList.textModels ?? []),
+    ...(modelList.imageGenModels ?? []),
+    ...(modelList.imagenModels ?? []),
+    ...(modelList.ttsModels ?? []),
+    ...(modelList.videoGenModels ?? []),
+    ...(modelList.openModels ?? []),
+    ...(modelList.researchModels ?? []),
+  ];
+
   const currentModelId: string =
     currentMode === "voice"
       ? modelList.currentVoiceModel
       : modelList.currentTextModel;
 
-  const currentModel: ModelInfo | undefined = models.find(
-    (m) => m.modelId === currentModelId,
-  );
+  const currentModel: ModelInfo | undefined =
+    currentMode === "voice"
+      ? modelList.voiceModels.find((m) => m.modelId === currentModelId)
+      : allNonVoiceModels.find((m) => m.modelId === currentModelId);
+
   const displayName: string = currentModel?.displayName ?? currentModelId;
 
   const handleSelect = (modelId: string): void => {
@@ -94,7 +166,9 @@ function ModelSelector({
       setIsOpen(false);
       return;
     }
-    onSwitch(modelId, currentMode);
+    // All non-voice models use mode "text" for switching
+    const mode: "voice" | "text" = currentMode === "voice" ? "voice" : "text";
+    onSwitch(modelId, mode);
     setIsOpen(false);
   };
 
@@ -142,45 +216,55 @@ function ModelSelector({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-border-primary bg-surface-primary shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-1 w-72 max-h-96 overflow-y-auto rounded-lg border border-border-primary bg-surface-primary shadow-lg">
           <div className="p-1.5">
-            <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary">
-              {currentMode === "voice" ? "Voice Models" : "Text Models"}
-            </div>
-            {models.map((model) => (
-              <button
-                key={model.modelId}
-                onClick={() => handleSelect(model.modelId)}
-                className={`w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-tertiary ${
-                  model.modelId === currentModelId
-                    ? "bg-surface-tertiary"
-                    : ""
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-text-primary">
-                    {model.displayName}
-                  </span>
-                  {model.modelId === currentModelId && (
-                    <svg
-                      className="h-3 w-3 text-accent-primary"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                  )}
-                </div>
-                <p className="text-[10px] text-text-tertiary mt-0.5">
-                  {model.capabilities.description}
-                </p>
-                <CapabilityBadges model={model} />
-              </button>
-            ))}
+            {currentMode === "voice" ? (
+              <ModelSection
+                title="Voice Models"
+                models={modelList.voiceModels}
+                currentModelId={currentModelId}
+                onSelect={handleSelect}
+              />
+            ) : (
+              <>
+                <ModelSection
+                  title="Text Models (with tools)"
+                  models={modelList.textModels ?? []}
+                  currentModelId={currentModelId}
+                  onSelect={handleSelect}
+                />
+                <ModelSection
+                  title="Image Generation"
+                  models={[...(modelList.imageGenModels ?? []), ...(modelList.imagenModels ?? [])]}
+                  currentModelId={currentModelId}
+                  onSelect={handleSelect}
+                />
+                <ModelSection
+                  title="Video Generation"
+                  models={modelList.videoGenModels ?? []}
+                  currentModelId={currentModelId}
+                  onSelect={handleSelect}
+                />
+                <ModelSection
+                  title="Text-to-Speech"
+                  models={modelList.ttsModels ?? []}
+                  currentModelId={currentModelId}
+                  onSelect={handleSelect}
+                />
+                <ModelSection
+                  title="Open Models (Gemma)"
+                  models={modelList.openModels ?? []}
+                  currentModelId={currentModelId}
+                  onSelect={handleSelect}
+                />
+                <ModelSection
+                  title="Deep Research"
+                  models={modelList.researchModels ?? []}
+                  currentModelId={currentModelId}
+                  onSelect={handleSelect}
+                />
+              </>
+            )}
           </div>
         </div>
       )}

@@ -324,6 +324,32 @@ function MainApp({
                   </button>
                 </div>
               )}
+              {/* No-tools warning banner */}
+              {(() => {
+                if (!modelList || chatMode === "voice") return null;
+                const currentTextModelId: string = modelList.currentTextModel;
+                const allNonVoice = [
+                  ...(modelList.textModels ?? []),
+                  ...(modelList.imageGenModels ?? []),
+                  ...(modelList.imagenModels ?? []),
+                  ...(modelList.ttsModels ?? []),
+                  ...(modelList.videoGenModels ?? []),
+                  ...(modelList.openModels ?? []),
+                  ...(modelList.researchModels ?? []),
+                ];
+                const currentModel = allNonVoice.find((m) => m.modelId === currentTextModelId);
+                if (currentModel && !currentModel.capabilities.supportsTools) {
+                  return (
+                    <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-1.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                      <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
+                      Tool integrations (Zotero, Semantic Scholar) unavailable with this model.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               {/* Chat messages */}
               <div className="flex-1 overflow-hidden">
                 <ChatPanel

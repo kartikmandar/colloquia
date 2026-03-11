@@ -207,14 +207,17 @@ export interface ModelCapabilitiesInfo {
   supportsVideoOutput: boolean;
   supportsAudioOutput: boolean;
   supportsThinking: boolean;
+  supportsTools: boolean;
   description: string;
   category: string;
+  apiPattern: string;
 }
 
 export interface ModelInfo {
   modelId: string;
   displayName: string;
   unstable?: boolean;
+  deprecated?: boolean;
   capabilities: ModelCapabilitiesInfo;
 }
 
@@ -223,6 +226,12 @@ export interface ModelListMessage {
   type: "model_list";
   voiceModels: ModelInfo[];
   textModels: ModelInfo[];
+  imageGenModels: ModelInfo[];
+  imagenModels: ModelInfo[];
+  ttsModels: ModelInfo[];
+  videoGenModels: ModelInfo[];
+  openModels: ModelInfo[];
+  researchModels: ModelInfo[];
   currentVoiceModel: string;
   currentTextModel: string;
 }
