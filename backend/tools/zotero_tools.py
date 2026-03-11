@@ -92,7 +92,7 @@ def create_zotero_tools(
 
     async def search_zotero_library(
         query: str = "", tag: str = "", collection: str = "", author: str = "",
-        limit: int = 20, fields: str = "key,title,creators,year",
+        limit: int = 20, fields: str = "key,title,creators,year,abstractNote",
     ) -> dict[str, Any]:
         """Search the user's Zotero library for papers by title, author, tag, or collection.
 
