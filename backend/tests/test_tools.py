@@ -2,7 +2,7 @@
 
 Tests cover:
 - Local tools: search_academic_papers, get_paper_recommendations
-- Semantic Scholar API: search, DOI lookup, recommendations
+- OpenAlex API: search, DOI lookup, recommendations
 - Zotero plugin: all 16 endpoints via direct HTTP (localhost:23119)
 - PDF processing: coordinate mapping, validation, page selection, rendering
 - Main agent: creation with real Gemini model strings
@@ -31,12 +31,12 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tools.local_tools import search_academic_papers, get_paper_recommendations
-from tools.semantic_scholar import (
-    search_academic_papers as s2_search,
+from tools.openalex import (
+    search_academic_papers as oa_search,
     get_paper_by_doi,
-    get_paper_recommendations as s2_recommend,
-    _format_paper,
-    _build_headers,
+    get_paper_recommendations as oa_recommend,
+    _format_work,
+    _reconstruct_abstract,
 )
 from tools.pdf_processing import (
     gemini_to_pdf_coords,
@@ -152,26 +152,26 @@ def long_pdf():
 
 
 # ============================================================================
-# 1. Semantic Scholar — real API calls
+# 1. OpenAlex — real API calls
 # ============================================================================
 
-class TestSemanticScholarSearch:
+class TestOpenAlexSearch:
     @pytest.mark.asyncio
     async def test_search_returns_papers(self):
-        result = await s2_search("21cm cosmology hydrogen")
+        result = await oa_search("21cm cosmology hydrogen")
         assert "papers" in result
         if "error" in result:
             # Rate limited — still a valid structured response
             assert "papers" in result
-            pytest.skip("S2 rate limited")
+            pytest.skip("OpenAlex rate limited")
         assert "total" in result
         assert isinstance(result["papers"], list)
 
     @pytest.mark.asyncio
     async def test_search_paper_fields(self):
-        result = await s2_search("HERA 21cm power spectrum", limit=1)
+        result = await oa_search("HERA 21cm power spectrum", limit=1)
         if "error" in result or len(result["papers"]) == 0:
-            pytest.skip("S2 rate limited or no results")
+            pytest.skip("OpenAlex rate limited or no results")
         paper = result["papers"][0]
         assert "title" in paper
         assert "authors" in paper
@@ -181,7 +181,7 @@ class TestSemanticScholarSearch:
 
     @pytest.mark.asyncio
     async def test_search_with_year_filter(self):
-        result = await s2_search("radio interferometry", year="2022-2024", limit=3)
+        result = await oa_search("radio interferometry", year="2022-2024", limit=3)
         assert "papers" in result
         for paper in result["papers"]:
             if paper["year"]:
@@ -189,22 +189,21 @@ class TestSemanticScholarSearch:
 
     @pytest.mark.asyncio
     async def test_search_limit(self):
-        result = await s2_search("machine learning", limit=2)
+        result = await oa_search("machine learning", limit=2)
         assert len(result["papers"]) <= 2
 
     @pytest.mark.asyncio
     async def test_search_no_results(self):
-        result = await s2_search("xyznonexistentqueryzzz12345")
+        result = await oa_search("xyznonexistentqueryzzz12345")
         assert "papers" in result
 
 
-class TestSemanticScholarDOI:
+class TestOpenAlexDOI:
     @pytest.mark.asyncio
     async def test_lookup_known_doi(self):
-        # Nature paper — may fail if S2 returns 400 for extended fields or rate limits
         result = await get_paper_by_doi("10.1038/s41586-020-2649-2")
         if result is None:
-            pytest.skip("S2 DOI lookup failed (rate limit or API change)")
+            pytest.skip("OpenAlex DOI lookup failed (rate limit or API change)")
         assert result["title"] is not None
         assert len(result["authors"]) > 0
         assert "references" in result
@@ -219,22 +218,22 @@ class TestSemanticScholarDOI:
     async def test_doi_has_extended_fields(self):
         result = await get_paper_by_doi("10.1038/s41586-020-2649-2")
         if result is None:
-            pytest.skip("S2 DOI lookup failed (rate limit or API change)")
+            pytest.skip("OpenAlex DOI lookup failed (rate limit or API change)")
         assert isinstance(result.get("references"), list)
         assert isinstance(result.get("citations"), list)
         assert "fieldsOfStudy" in result
 
 
-class TestSemanticScholarRecommendations:
+class TestOpenAlexRecommendations:
     @pytest.mark.asyncio
     async def test_recommendations(self):
         # First search for a paper to get an ID
-        search = await s2_search("21cm cosmology HERA", limit=1)
+        search = await oa_search("21cm cosmology HERA", limit=1)
         if "error" in search or len(search["papers"]) == 0:
-            pytest.skip("S2 rate limited or no results for search")
+            pytest.skip("OpenAlex rate limited or no results for search")
         paper_id = search["papers"][0]["paperId"]
 
-        recs = await s2_recommend(paper_id, limit=3)
+        recs = await oa_recommend(paper_id, limit=3)
         assert isinstance(recs, list)
         for rec in recs:
             assert "title" in rec
@@ -242,7 +241,7 @@ class TestSemanticScholarRecommendations:
 
 
 class TestLocalToolWrappers:
-    """Test the wrapper functions in local_tools.py that call S2 functions."""
+    """Test the wrapper functions in local_tools.py that call OpenAlex functions."""
 
     @pytest.mark.asyncio
     async def test_search_academic_papers_default_limit(self):
@@ -265,43 +264,63 @@ class TestLocalToolWrappers:
             assert isinstance(recs, list)
 
 
-class TestFormatPaper:
-    def test_full_paper(self):
+class TestFormatWork:
+    def test_full_work(self):
         raw = {
-            "paperId": "abc",
+            "id": "https://openalex.org/W1234567890",
             "title": "Test Paper",
-            "authors": [{"name": "Alice"}, {"name": "Bob"}],
-            "year": 2024,
-            "citationCount": 42,
-            "doi": "10.1234/test",
-            "abstract": "An abstract.",
-            "venue": "Nature",
-            "url": "https://example.com",
-            "externalIds": {"DOI": "10.1234/test"},
+            "authorships": [
+                {"author": {"display_name": "Alice"}},
+                {"author": {"display_name": "Bob"}},
+            ],
+            "publication_year": 2024,
+            "cited_by_count": 42,
+            "doi": "https://doi.org/10.1234/test",
+            "abstract_inverted_index": {"An": [0], "abstract.": [1]},
+            "primary_location": {"source": {"display_name": "Nature"}},
+            "open_access": {"oa_url": "https://example.com/oa"},
         }
-        result = _format_paper(raw)
+        result = _format_work(raw)
         assert result["title"] == "Test Paper"
         assert result["authors"] == ["Alice", "Bob"]
         assert result["citationCount"] == 42
+        assert result["paperId"] == "W1234567890"
+        assert result["doi"] == "10.1234/test"
+        assert result["abstract"] == "An abstract."
+        assert result["venue"] == "Nature"
+        assert result["openAccessUrl"] == "https://example.com/oa"
 
     def test_missing_fields(self):
-        result = _format_paper({})
+        result = _format_work({})
         assert result["title"] is None
         assert result["authors"] == []
+        assert result["paperId"] == ""
 
     def test_author_with_no_name(self):
-        result = _format_paper({"authors": [{"name": "Alice"}, {}, {"name": None}]})
+        result = _format_work({
+            "authorships": [
+                {"author": {"display_name": "Alice"}},
+                {"author": {}},
+                {"author": {"display_name": None}},
+            ]
+        })
         assert result["authors"] == ["Alice"]
 
 
-class TestBuildHeaders:
-    def test_without_key(self):
-        h = _build_headers()
-        assert "x-api-key" not in h
+class TestReconstructAbstract:
+    def test_normal_abstract(self):
+        idx = {"Hello": [0], "world": [1], "of": [2], "science": [3]}
+        assert _reconstruct_abstract(idx) == "Hello world of science"
 
-    def test_with_key(self):
-        h = _build_headers("my-key")
-        assert h["x-api-key"] == "my-key"
+    def test_repeated_words(self):
+        idx = {"the": [0, 2], "cat": [1], "sat": [3]}
+        assert _reconstruct_abstract(idx) == "the cat the sat"
+
+    def test_none_input(self):
+        assert _reconstruct_abstract(None) is None
+
+    def test_empty_dict(self):
+        assert _reconstruct_abstract({}) is None
 
 
 # ============================================================================

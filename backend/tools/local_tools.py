@@ -7,14 +7,14 @@ handling inside.
 
 from typing import Any
 
-from tools.semantic_scholar import (
-    search_academic_papers as _s2_search,
-    get_paper_recommendations as _s2_recommend,
+from tools.openalex import (
+    search_academic_papers as _oa_search,
+    get_paper_recommendations as _oa_recommend,
 )
 
 
 async def search_academic_papers(query: str, year: str, limit: int) -> dict[str, Any]:
-    """Search Semantic Scholar for academic papers by query.
+    """Search OpenAlex for academic papers by query.
 
     Returns titles, authors, years, citation counts, DOIs, and abstracts.
     Use this to help users discover papers not in their Zotero library.
@@ -26,17 +26,17 @@ async def search_academic_papers(query: str, year: str, limit: int) -> dict[str,
     """
     actual_year: str | None = year if year else None
     actual_limit: int = limit if limit > 0 else 5
-    return await _s2_search(query=query, year=actual_year, limit=actual_limit)
+    return await _oa_search(query=query, year=actual_year, limit=actual_limit)
 
 
 async def get_paper_recommendations(paper_id: str, limit: int) -> list[dict[str, Any]]:
-    """Get paper recommendations based on a seed paper from Semantic Scholar.
+    """Get paper recommendations based on a seed paper from OpenAlex.
 
-    Provide the Semantic Scholar paper ID to find similar papers.
+    Provide the OpenAlex work ID to find similar papers.
 
     Args:
-        paper_id: Semantic Scholar paper ID (or 'DOI:10.xxx/yyy' format).
+        paper_id: OpenAlex work ID (e.g. 'W1234567890'), or 'DOI:10.xxx/yyy' format.
         limit: Max recommendations to return. Pass 0 for default (5).
     """
     actual_limit: int = limit if limit > 0 else 5
-    return await _s2_recommend(paper_id=paper_id, limit=actual_limit)
+    return await _oa_recommend(paper_id=paper_id, limit=actual_limit)

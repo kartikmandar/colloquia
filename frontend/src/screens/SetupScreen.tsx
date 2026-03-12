@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { getGeminiKey, getS2Key, setGeminiKey, setS2Key } from "../lib/apiKeys";
+import { getGeminiKey, setGeminiKey } from "../lib/apiKeys";
 
 interface SetupScreenProps {
   onComplete: () => void;
@@ -7,9 +7,7 @@ interface SetupScreenProps {
 
 function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
   const [geminiKey, setGeminiKeyState] = useState<string>(getGeminiKey() ?? "");
-  const [s2Key, setS2KeyState] = useState<string>(getS2Key() ?? "");
   const [showGeminiKey, setShowGeminiKey] = useState<boolean>(false);
-  const [showS2Key, setShowS2Key] = useState<boolean>(false);
   const [geminiError, setGeminiError] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
@@ -38,9 +36,6 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
     // Simulate a brief validation delay; actual API ping will be added later
     setTimeout((): void => {
       setGeminiKey(geminiKey.trim());
-      if (s2Key.trim()) {
-        setS2Key(s2Key.trim());
-      }
       setIsLoading(false);
       onComplete();
     }, 400);
@@ -113,38 +108,6 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
                 Google AI Studio
               </a>
             </p>
-          </div>
-
-          {/* Semantic Scholar API Key */}
-          <div>
-            <label
-              htmlFor="s2-key"
-              className="mb-1 block text-sm font-medium text-text-primary"
-            >
-              Semantic Scholar API Key{" "}
-              <span className="text-xs font-normal text-text-tertiary">
-                (optional)
-              </span>
-            </label>
-            <div className="relative">
-              <input
-                id="s2-key"
-                type={showS2Key ? "text" : "password"}
-                value={s2Key}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>): void =>
-                  setS2KeyState(e.target.value)
-                }
-                placeholder="Optional — for higher rate limits"
-                className="w-full rounded-xl border border-border-primary bg-surface-primary px-4 py-2.5 pr-16 text-sm text-text-primary outline-none transition-all focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20 focus:shadow-soft"
-              />
-              <button
-                type="button"
-                onClick={(): void => setShowS2Key(!showS2Key)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 rounded px-2 py-1 text-xs text-text-secondary transition-colors hover:text-text-primary"
-              >
-                {showS2Key ? "Hide" : "Show"}
-              </button>
-            </div>
           </div>
 
           {/* Privacy Notice */}

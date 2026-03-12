@@ -17,3 +17,6 @@ ZOTERO_TIMEOUT: float = 10.0
 TEXT_TOKEN_BUDGET: int = 30000
 MAX_FULLTEXT_CHARS: int = 100_000
 MAX_HISTORY_TURNS: int = 20  # ~10 user-model exchanges
+
+# OpenAlex polite pool email (for higher rate limits, no key needed)
+OPENALEX_MAILTO: str = "colloquia-app@users.noreply.github.com"

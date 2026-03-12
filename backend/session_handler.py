@@ -629,7 +629,7 @@ async def handle_text_message(
                     f"When deep analysis is needed, say so explicitly.\n\n"
                     f"## Tools Available\n"
                     f"- search_zotero_library — search the user's Zotero library\n"
-                    f"- search_academic_papers — search Semantic Scholar\n"
+                    f"- search_academic_papers — search OpenAlex\n"
                     f"- add_paper_to_zotero — add a paper (confirm first)\n"
                     f"- get_paper_recommendations — find similar papers\n"
                     f"- manage_tags, manage_collection — organize the library\n"
@@ -659,7 +659,7 @@ async def handle_text_message(
             else:
                 # Append a note to system instruction that tools are unavailable
                 system_instruction += (
-                    "\n\nNote: Tool integrations (Zotero, Semantic Scholar) are not available "
+                    "\n\nNote: Tool integrations (Zotero, OpenAlex) are not available "
                     "with this model. Respond based on your knowledge only."
                 )
 

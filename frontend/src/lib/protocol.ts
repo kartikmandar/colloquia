@@ -44,7 +44,6 @@ export interface PageImage {
 export interface ConfigMessage {
   type: "config";
   gemini_api_key: string;
-  s2_api_key?: string; // Semantic Scholar (optional)
 }
 
 /** Audio chunk from microphone */

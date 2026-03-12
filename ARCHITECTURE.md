@@ -12,7 +12,7 @@ Everything else in this guide — the plugin, the annotations, the library manag
 
 Colloquia has two conversation states, each with its own system prompt:
 
-**Lobby mode (no paper selected):** The user opens Colloquia and starts talking before picking a paper. The agent acts as a general research assistant with access to the user's Zotero library, Semantic Scholar, and web search. This is the natural starting state — the user might say "find me papers about 21cm foreground subtraction" or "what's in my HERA collection?" or "catch me up on recent CMB lensing results." The agent can search, browse, and recommend papers, and when the user picks one, the session transitions to paper mode.
+**Lobby mode (no paper selected):** The user opens Colloquia and starts talking before picking a paper. The agent acts as a general research assistant with access to the user's Zotero library, OpenAlex, and web search. This is the natural starting state — the user might say "find me papers about 21cm foreground subtraction" or "what's in my HERA collection?" or "catch me up on recent CMB lensing results." The agent can search, browse, and recommend papers, and when the user picks one, the session transitions to paper mode.
 
 **Paper mode (paper selected):** The full paper context is loaded and the agent becomes a deep discussion partner for that specific paper. All annotation, tagging, and figure-analysis tools become available.
 
@@ -51,7 +51,7 @@ You open Colloquia, paste your Gemini API key, and start talking — no paper se
 
 > **You:** "What's in my library about foreground subtraction?"
 >
-> **Colloquia:** "You have 7 papers matching 'foreground subtraction.' The most recent is Chapman et al. 2024 on GPR-based foreground removal, and there's the classic Morales & Hewitt 2004 review. Want me to pull up any of these, or should I search Semantic Scholar for recent work you might be missing?"
+> **Colloquia:** "You have 7 papers matching 'foreground subtraction.' The most recent is Chapman et al. 2024 on GPR-based foreground removal, and there's the classic Morales & Hewitt 2004 review. Want me to pull up any of these, or should I search OpenAlex for recent work you might be missing?"
 >
 > **You:** "Search for anything new from 2025 on that topic."
 >
@@ -119,17 +119,17 @@ This is where Colloquia goes beyond a static paper reader. When you ask about a 
 # Enable grounding in the session config
 tools = [
     {"google_search": {}},           # Automatic web grounding
-    {"function_declarations": [...]}  # Custom tools (Zotero, Semantic Scholar)
+    {"function_declarations": [...]}  # Custom tools (Zotero, OpenAlex)
 ]
 ```
 
-**Custom search tools (Semantic Scholar, OpenAlex):** For academic-specific queries — "What has this author published since this paper?" or "Are there papers that cite this one and disagree with the results?" — the agent calls `search_academic_papers` with structured queries. These return citation counts, abstracts, and DOIs, which the agent weaves into the conversation naturally.
+**Custom search tools (OpenAlex, OpenAlex):** For academic-specific queries — "What has this author published since this paper?" or "Are there papers that cite this one and disagree with the results?" — the agent calls `search_academic_papers` with structured queries. These return citation counts, abstracts, and DOIs, which the agent weaves into the conversation naturally.
 
 ### Conversation modes and what they're for
 
 | Mode | Model | Best for | How it works |
 |------|-------|----------|--------------|
-| **Lobby** (no paper) | Voice: `live-2.5-flash-native-audio`, Text: `3.1-flash-lite` | Library browsing, paper discovery, general research questions | Agent has Zotero + Semantic Scholar + web search. No paper-specific tools. Transitions to paper mode when a paper is selected. |
+| **Lobby** (no paper) | Voice: `live-2.5-flash-native-audio`, Text: `3.1-flash-lite` | Library browsing, paper discovery, general research questions | Agent has Zotero + OpenAlex + web search. No paper-specific tools. Transitions to paper mode when a paper is selected. |
 | **Paper + voice** | `live-2.5-flash-native-audio` | Exploration, Q&A, "explain this to me", first-pass reading | Real-time audio via Live API. Full paper in context. Barge-in supported. |
 | **Paper + text** | `3.1-flash-lite` | Derivations, equations, code, structured output | Standard `generateContent`. Markdown formatting. |
 
@@ -143,9 +143,9 @@ Beyond just answering questions about the paper's content, the agent actively us
 
 | User says... | Agent does... |
 |-------------|--------------|
-| "Find me papers about 21cm foreground subtraction" | Searches Semantic Scholar → summarizes top results with citation counts → offers to add any to library |
+| "Find me papers about 21cm foreground subtraction" | Searches OpenAlex → summarizes top results with citation counts → offers to add any to library |
 | "What's in my HERA collection?" | Queries Zotero local API → lists papers with brief descriptions |
-| "What's the latest on EoR detection?" | Google Search for recent news + Semantic Scholar for recent papers → synthesizes a brief landscape overview |
+| "What's the latest on EoR detection?" | Google Search for recent news + OpenAlex for recent papers → synthesizes a brief landscape overview |
 | "Let's look at the Kern et al. 2025 paper" | Loads paper from Zotero (or offers to add it first) → transitions to paper mode |
 
 **In paper mode (paper loaded):**
@@ -154,12 +154,12 @@ Beyond just answering questions about the paper's content, the agent actively us
 |-------------|--------------|
 | "What's a power spectrum?" | Explains from knowledge + searches web for visual aids if needed |
 | "Explain Figure 3" | Describes the figure from vision context + creates a purple annotation in Zotero's PDF reader highlighting it |
-| "They reference a Smith et al. 2023 paper — what's that about?" | Searches Semantic Scholar → summarizes the referenced paper → checks if it's in your library → offers to add it |
+| "They reference a Smith et al. 2023 paper — what's that about?" | Searches OpenAlex → summarizes the referenced paper → checks if it's in your library → offers to add it |
 | "Compare their approach to the LOFAR method" | Searches web for LOFAR methodology → explains the differences → suggests relevant papers |
-| "Is this result consistent with other experiments?" | Searches for corroborating/contradicting papers via Google Search + Semantic Scholar |
+| "Is this result consistent with other experiments?" | Searches for corroborating/contradicting papers via Google Search + OpenAlex |
 | "I don't buy their error analysis" | Critiques the methodology step-by-step, searches for papers with similar concerns |
 | "Tag this as 'needs-replication' and put it in my HERA collection" | Calls Zotero plugin to add tags and move to collection |
-| "What's new in 21cm cosmology since this was published?" | Google Search grounding for recent developments, Semantic Scholar for recent papers |
+| "What's new in 21cm cosmology since this was published?" | Google Search grounding for recent developments, OpenAlex for recent papers |
 
 The system prompts (see below) are specifically designed to make the agent behave like a **knowledgeable colleague, not a generic chatbot** — whether browsing your library or deep-diving into a specific paper.
 
@@ -194,17 +194,17 @@ The recommended architecture is a **hybrid local+cloud pattern** that solves the
 │ • genai aio.live.connect()        │                   flash-native-audio)
 │ • Tool orchestration loop         │
 │ • Zotero tools (via frontend)     │
-│ • Semantic Scholar search         │     REST
-│ • Google Search grounding         │ ──────────────►  Semantic Scholar /
+│ • OpenAlex search         │     REST
+│ • Google Search grounding         │ ──────────────►  OpenAlex /
 │ • Session state management        │                   OpenAlex APIs
 └───────────────────────────────────┘
 ```
 
-The frontend runs locally via `npm run dev`, giving it access to Zotero through Vite's built-in proxy. It captures microphone audio at **16kHz PCM** and streams it over WebSocket to the Cloud Run backend. The backend manages the Gemini Live API session via `genai.Client.aio.live.connect()`, executes tool calls (Zotero search, metadata lookup, Google Search, Semantic Scholar), and streams audio responses back. The frontend plays responses at **24kHz PCM** through the Web Audio API.
+The frontend runs locally via `npm run dev`, giving it access to Zotero through Vite's built-in proxy. It captures microphone audio at **16kHz PCM** and streams it over WebSocket to the Cloud Run backend. The backend manages the Gemini Live API session via `genai.Client.aio.live.connect()`, executes tool calls (Zotero search, metadata lookup, Google Search, OpenAlex), and streams audio responses back. The frontend plays responses at **24kHz PCM** through the Web Audio API.
 
 **Write operations flow through the Zotero plugin:** When the agent needs to create notes, add tags, create annotations, or add papers, the tool call is handled by the backend, which instructs the frontend (via the WebSocket) to call the plugin's endpoints on `localhost:23119/colloquia/*`. This keeps all Zotero write operations local — Cloud Run never needs to reach the user's machine directly.
 
-**Why backend proxy over direct client-to-Gemini:** The backend manages tool execution server-side — when Gemini emits a `function_call` mid-stream, the backend executes it (Semantic Scholar search, Zotero operations, etc.) and sends the `function_response` back, all without the frontend needing to know about tool internals. With direct client-to-Gemini from the browser, you'd need to relay tool calls back to the backend anyway. The backend proxy pattern also keeps the user's API key off the client-side network (it only transits to Google's API, not to arbitrary tool endpoints). The user's Gemini API key is sent once per session via the WebSocket handshake and used server-side — never stored persistently.
+**Why backend proxy over direct client-to-Gemini:** The backend manages tool execution server-side — when Gemini emits a `function_call` mid-stream, the backend executes it (OpenAlex search, Zotero operations, etc.) and sends the `function_response` back, all without the frontend needing to know about tool internals. With direct client-to-Gemini from the browser, you'd need to relay tool calls back to the backend anyway. The backend proxy pattern also keeps the user's API key off the client-side network (it only transits to Google's API, not to arbitrary tool endpoints). The user's Gemini API key is sent once per session via the WebSocket handshake and used server-side — never stored persistently.
 
 ### Bring-your-own-key (BYOK) architecture
 
@@ -213,7 +213,7 @@ Colloquia is fully open source and stores no API keys server-side. The user prov
 | Key | Required | Where to get it | How it's used |
 |-----|----------|-----------------|---------------|
 | **Gemini API key** | Yes | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Sent to backend per-session via WebSocket; backend uses it to connect to Gemini Live API |
-| **Semantic Scholar API key** | No (recommended) | [semanticscholar.org/product/api](https://www.semanticscholar.org/product/api) | Higher rate limits for paper search; works without one at reduced throughput |
+| **OpenAlex** | No (free) | [openalex.org](https://openalex.org) | Academic paper search — no API key needed, uses polite pool with mailto header |
 
 **Key flow:** The frontend persists API keys in `localStorage` so the user only enters them once. On app startup, if a key exists, the app skips the setup screen and goes straight to the lobby. On session start, the frontend sends a `config` message via WebSocket containing the key. The backend uses it for that session's Gemini connection, then discards it when the WebSocket closes.
 
@@ -222,14 +222,11 @@ The settings panel shows a brief notice: *"Your API key is stored locally in you
 ```typescript
 // src/lib/apiKeys.ts
 const GEMINI_KEY = "colloquia:geminiApiKey";
-const S2_KEY = "colloquia:semanticScholarApiKey";
 
 export const apiKeys = {
   getGeminiKey: () => localStorage.getItem(GEMINI_KEY),
   setGeminiKey: (key: string) => localStorage.setItem(GEMINI_KEY, key),
-  getS2Key: () => localStorage.getItem(S2_KEY),
-  setS2Key: (key: string) => localStorage.setItem(S2_KEY, key),
-  clearAll: () => { localStorage.removeItem(GEMINI_KEY); localStorage.removeItem(S2_KEY); }
+  clearAll: () => { localStorage.removeItem(GEMINI_KEY); }
 };
 
 // App startup: skip setup if key exists
@@ -246,7 +243,7 @@ ws.onopen = () => {
   ws.send(JSON.stringify({
     type: "config",
     geminiApiKey: apiKeys.getGeminiKey(),
-    semanticScholarApiKey: apiKeys.getS2Key()  // optional
+    // OpenAlex needs no API key
   }));
 };
 ```
@@ -292,7 +289,7 @@ All WebSocket messages are JSON (except raw audio binary frames). Define these m
 // Frontend → Backend
 type ClientMessage =
   | { type: "config"; geminiApiKey: string;        // MUST be first message after connect
-      semanticScholarApiKey?: string }
+      }
   | { type: "audio"; data: string }              // base64 PCM16 audio chunk
   | { type: "text"; text: string }                // text chat input
   | { type: "paper_context"; paperKey: string;    // optional — can arrive at session start
@@ -1448,64 +1445,54 @@ The agent proactively identifies referenced papers during discussion and offers 
 
 ### Academic paper search integration
 
-**Semantic Scholar API** is the primary integration — free, no auth required for basic use, and purpose-built for academic search. The Python `semanticscholar` package provides a typed client, but for simplicity, direct HTTP calls via `httpx` work well:
+**OpenAlex API** is the primary integration — free, open, and covers 250M+ scholarly works. No API key required; uses a polite pool with a `mailto` header for higher rate limits (10 req/sec vs 100k req/day). Direct HTTP calls via `httpx`:
 
 ```python
 import httpx
 
-S2_BASE = "https://api.semanticscholar.org/graph/v1"
+OA_BASE = "https://api.openalex.org"
 
 async def search_academic_papers(query: str, year: str = None, limit: int = 5) -> dict:
-    """Search Semantic Scholar for papers."""
+    """Search OpenAlex for papers."""
     params = {
-        "query": query,
-        "limit": limit,
-        "fields": "title,authors,year,abstract,citationCount,externalIds,url,venue"
+        "search": query,
+        "per_page": limit,
+        "sort": "cited_by_count:desc",
+        "mailto": "colloquia-app@users.noreply.github.com",
     }
     if year:
-        params["year"] = year
+        params["filter"] = f"publication_year:{year}"
     async with httpx.AsyncClient() as client:
-        resp = await client.get(f"{S2_BASE}/paper/search", params=params)
+        resp = await client.get(f"{OA_BASE}/works", params=params)
         data = resp.json()
         return {
-            "papers": [{
-                "title": p.get("title"),
-                "authors": [a["name"] for a in p.get("authors", [])],
-                "year": p.get("year"),
-                "citationCount": p.get("citationCount"),
-                "doi": p.get("externalIds", {}).get("DOI"),
-                "abstract": (p.get("abstract") or "")[:300],
-                "venue": p.get("venue")
-            } for p in data.get("data", [])]
+            "papers": [_format_work(p) for p in data.get("results", [])]
         }
 
 async def get_paper_by_doi(doi: str) -> dict:
     """Get paper details by DOI."""
     async with httpx.AsyncClient() as client:
-        resp = await client.get(
-            f"{S2_BASE}/paper/DOI:{doi}",
-            params={"fields": "title,authors,year,abstract,citationCount,references,citations,externalIds"}
-        )
+        resp = await client.get(f"{OA_BASE}/works/https://doi.org/{doi}")
         return resp.json()
 
-async def get_recommendations(paper_id: str, limit: int = 5) -> dict:
-    """Get recommended papers similar to a given paper."""
+async def get_recommendations(paper_id: str, limit: int = 5) -> list:
+    """Get recommended papers via related_works field."""
     async with httpx.AsyncClient() as client:
-        resp = await client.post(
-            "https://api.semanticscholar.org/recommendations/v1/papers/",
-            json={"positivePaperIds": [paper_id]},
-            params={"limit": limit, "fields": "title,authors,year,citationCount,externalIds"}
-        )
-        return resp.json()
+        resp = await client.get(f"{OA_BASE}/works/{paper_id}")
+        seed = resp.json()
+        related_ids = seed.get("related_works", [])[:limit]
+        if related_ids:
+            filter_str = "|".join(related_ids)
+            resp = await client.get(f"{OA_BASE}/works", params={"filter": f"openalex:{filter_str}"})
+            return resp.json().get("results", [])
+        return []
 ```
 
-**Semantic Scholar rate limits:** Unauthenticated: 100 requests per 5 minutes. With free API key: 1 RPS. For the hackathon, unauthenticated is sufficient.
-
-**OpenAlex** as supplement: The OpenAlex API covers 250M+ scholarly works with DOI lookup (`/works/doi:10.xxx`), keyword search (`/works?search=query`), and semantic search. As of early 2025, OpenAlex requires a free API key (100k credits/day). Use OpenAlex as a fallback when Semantic Scholar doesn't have the paper, or for its semantic search capabilities.
+**OpenAlex rate limits:** 100k requests/day without auth, 10 req/sec with polite pool (`mailto` header). More than sufficient for the hackathon.
 
 ### Zotero plugin endpoint for adding papers
 
-> **⚠️ Test `Zotero.Translate.Search()` on Day 3, not Day 4.** The DOI-based import via Zotero's translator infrastructure is the right approach — it pulls full metadata, abstracts, and even PDF links automatically. However, this API can be flaky: it depends on Zotero's translator infrastructure being loaded, network access to DOI resolvers, and the specific translator for each publisher. If it fails silently or throws, fall back to the manual `new Zotero.Item('journalArticle')` path using metadata already fetched from Semantic Scholar. Wrap the translate path in a try/catch with the manual path as the explicit fallback.
+> **⚠️ Test `Zotero.Translate.Search()` on Day 3, not Day 4.** The DOI-based import via Zotero's translator infrastructure is the right approach — it pulls full metadata, abstracts, and even PDF links automatically. However, this API can be flaky: it depends on Zotero's translator infrastructure being loaded, network access to DOI resolvers, and the specific translator for each publisher. If it fails silently or throws, fall back to the manual `new Zotero.Item('journalArticle')` path using metadata already fetched from OpenAlex. Wrap the translate path in a try/catch with the manual path as the explicit fallback.
 
 ```javascript
 // Plugin endpoint: POST /colloquia/addPaper
@@ -1573,7 +1560,7 @@ Zotero.Server.Endpoints["/colloquia/addPaper"].prototype = {
 discovery_tools = [
     {
         "name": "search_academic_papers",
-        "description": "Search for academic papers by title, author, or topic using Semantic Scholar. Use when a referenced paper is mentioned or the user wants related work.",
+        "description": "Search for academic papers by title, author, or topic using OpenAlex. Use when a referenced paper is mentioned or the user wants related work.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -1608,11 +1595,11 @@ discovery_tools = [
     },
     {
         "name": "get_paper_recommendations",
-        "description": "Get similar papers from Semantic Scholar for literature gap analysis.",
+        "description": "Get similar papers from OpenAlex for literature gap analysis.",
         "parameters": {
             "type": "object",
             "properties": {
-                "paperId": {"type": "string", "description": "Semantic Scholar paper ID or DOI"},
+                "paperId": {"type": "string", "description": "OpenAlex paper ID or DOI"},
                 "limit": {"type": "integer"}
             },
             "required": ["paperId"]
@@ -1783,7 +1770,7 @@ management_tools = [
 | Audio quality/echo issues | Poor user experience | Medium | Recommend headphones in UI; use AudioWorklet (not deprecated ScriptProcessorNode) |
 | Gemini bounding box inaccuracy | Annotations placed incorrectly | Medium | Validate coordinates (reject zeros, out-of-range); allow user to adjust annotations in Zotero afterwards |
 | Zotero plugin CORS issues | Write operations fail | Low | Vite proxy handles this; test early on Day 3 |
-| Semantic Scholar rate limits | Paper search throttled | Low | 100 req/5min is generous; cache results; fall back to Google Search grounding |
+| OpenAlex rate limits | Paper search throttled | Low | 100 req/5min is generous; cache results; fall back to Google Search grounding |
 | Browser compatibility | Audio capture fails | Low | Target Chrome/Edge; require HTTPS or localhost; add "Click to Start" button |
 
 ---
@@ -1816,7 +1803,7 @@ What the user experiences for specific failures:
 
 | Failure | User sees | Agent says |
 |---------|-----------|------------|
-| Semantic Scholar down | Toast: "Paper search unavailable" | "I can't search Semantic Scholar right now. Let me try Google Search instead." (falls back to grounding) |
+| OpenAlex down | Toast: "Paper search unavailable" | "I can't search OpenAlex right now. Let me try Google Search instead." (falls back to grounding) |
 | Annotation coordinate validation fails | Toast: "Annotation placement failed" | "I wasn't able to place that annotation precisely — the coordinates didn't map correctly. You can add it manually in Zotero." |
 | Zotero plugin timeout (10s) | Toast: "Zotero didn't respond" | "I couldn't write to Zotero — is it still running? Check that the Colloquia plugin is installed." |
 | Gemini session drops | **Reconnection spinner** overlay on chat | (Session resumes automatically via resumption handle — user sees "Reconnecting..." for 1-3s) |
@@ -1890,11 +1877,11 @@ If the library is empty, show a welcoming onboarding screen:
 
 > **"Your Zotero library is empty — let's fix that!"**
 > Search for papers in your area to get started:
-> `[Search field: "21cm cosmology"]` → [Search Semantic Scholar]
+> `[Search field: "21cm cosmology"]` → [Search OpenAlex]
 >
 > Or: try Colloquia in lobby mode — just start talking and ask me to find papers for you.
 
-The lobby agent handles this naturally — "find me papers about radio interferometry" works even with an empty library, since it searches Semantic Scholar and offers to add results. The onboarding screen is just the nudge to start that conversation.
+The lobby agent handles this naturally — "find me papers about radio interferometry" works even with an empty library, since it searches OpenAlex and offers to add results. The onboarding screen is just the nudge to start that conversation.
 
 ---
 
@@ -1906,12 +1893,12 @@ Colloquia uses two system prompts, swapped based on session mode. The backend se
 
 ```
 You are Colloquia — a research assistant with access to the user's Zotero
-library, academic paper search (Semantic Scholar), and web search. No paper is
+library, academic paper search (OpenAlex), and web search. No paper is
 currently loaded for deep discussion.
 
 ## What You Can Do
 - Search the user's Zotero library: "What papers do I have on [topic]?"
-- Search for new papers on Semantic Scholar: "Find recent work on [topic]"
+- Search for new papers on OpenAlex: "Find recent work on [topic]"
 - Get paper recommendations based on a paper the user mentions
 - Add papers to the user's library (always confirm first)
 - Browse and organize collections and tags
@@ -1935,14 +1922,14 @@ to show the full list in the chat.
 
 ## Tools Available
 - search_zotero_library — search the user's Zotero library
-- search_academic_papers — search Semantic Scholar
+- search_academic_papers — search OpenAlex
 - add_paper_to_zotero — add a paper (confirm first)
 - get_paper_recommendations — find similar papers
 - manage_tags, manage_collection — organize the library
 - Google Search — web lookup for any research question
 
 If a tool returns an error, explain briefly and try an alternative (e.g., use
-Google Search if Semantic Scholar fails). Never silently swallow errors.
+Google Search if OpenAlex fails). Never silently swallow errors.
 ```
 
 ### Paper mode prompt (paper loaded for discussion)
@@ -1989,7 +1976,7 @@ clearly without condescension. When unsure of the right level, give the intuitio
 first and offer depth: "The short version is... Want me to unpack that?"
 
 ## Web Search and Knowledge Augmentation
-You have access to Google Search and Semantic Scholar. USE THEM LIBERALLY:
+You have access to Google Search and OpenAlex. USE THEM LIBERALLY:
 - Don't just answer from the paper — bring in broader context
 - If the user asks about a technique, search for recent developments or tutorials
 - If a concept is from another field, search for an accessible explanation
@@ -2001,7 +1988,7 @@ You have access to Google Search and Semantic Scholar. USE THEM LIBERALLY:
 
 ## Your Tools
 - search_zotero_library — find papers in the user's library
-- search_academic_papers — search Semantic Scholar for papers, authors, citations
+- search_academic_papers — search OpenAlex for papers, authors, citations
 - add_paper_to_zotero — add discovered papers (always confirm first)
 - get_paper_recommendations — literature gap analysis and related work
 - annotate_zotero_pdf — create live annotations in Zotero's PDF reader when
@@ -2041,7 +2028,7 @@ When you notice a referenced paper in the discussion:
 
 ## Error Handling and Graceful Degradation
 If a tool returns an error, explain the issue briefly and try an alternative:
-- Semantic Scholar fails → "Paper search is temporarily unavailable. Let me
+- OpenAlex fails → "Paper search is temporarily unavailable. Let me
   try Google Search instead." (use Google Search grounding)
 - Zotero write fails → "I couldn't save that to Zotero — is it still running?
   You can do it manually: [describe the action]."
@@ -2067,13 +2054,13 @@ so and offer to search for verification. Your goal is to make the user
 
 ## Updated six-day development plan (March 11–16, demo March 17)
 
-**Day 1 — Foundation and Zotero read integration.** Initialize Vite + React + TypeScript. Configure Vite proxy for Zotero (both `/zotero-api` and `/zotero-plugin` routes). **Define the frontend ↔ backend WebSocket message protocol** (see protocol spec above) — this prevents integration headaches on Days 2–4. Build the settings panel for BYOK API key entry (Gemini key required, Semantic Scholar optional — persist in `localStorage`, skip setup screen on subsequent launches, add "Change API key" in settings). Build paper browser: list collections, search items, display metadata. Implement the Zotero health check (ping `localhost:23119` on startup, show onboarding UI if Zotero is unavailable). Set up FastAPI backend skeleton on Cloud Run with `--min-instances=1 --timeout=3600`. Test basic `genai.Client(api_key=...).aio.live.connect()` call with user-provided key. **Deliverable:** Browse and search Zotero library in the UI; backend deployed; WebSocket protocol documented and typed; API key entry working.
+**Day 1 — Foundation and Zotero read integration.** Initialize Vite + React + TypeScript. Configure Vite proxy for Zotero (both `/zotero-api` and `/zotero-plugin` routes). **Define the frontend ↔ backend WebSocket message protocol** (see protocol spec above) — this prevents integration headaches on Days 2–4. Build the settings panel for BYOK API key entry (Gemini key required, OpenAlex optional — persist in `localStorage`, skip setup screen on subsequent launches, add "Change API key" in settings). Build paper browser: list collections, search items, display metadata. Implement the Zotero health check (ping `localhost:23119` on startup, show onboarding UI if Zotero is unavailable). Set up FastAPI backend skeleton on Cloud Run with `--min-instances=1 --timeout=3600`. Test basic `genai.Client(api_key=...).aio.live.connect()` call with user-provided key. **Deliverable:** Browse and search Zotero library in the UI; backend deployed; WebSocket protocol documented and typed; API key entry working.
 
 **Day 2 — Voice pipeline + tool orchestration loop.** Implement audio capture (getUserMedia + AudioWorklet at 16kHz) and playback (AudioBufferSourceNode at 24kHz). Write the `run_session()` event loop with `client.aio.live.connect()` — handle audio forwarding, tool call interception, and transcript extraction. Wire frontend WebSocket to backend. Basic voice conversation with lobby prompt. Verify `send_client_content(role="system")` mid-session prompt swap works. **Deliverable:** Speak to Gemini and hear responses; tool call loop working with at least one test tool.
 
 **Day 3 — Paper context + Zotero plugin MVP.** Paper content extraction via Zotero fulltext endpoint; send content to backend at session init. Scaffold the Zotero plugin from `windingwind/zotero-plugin-template`. Implement core endpoints: `createNote`, `addTags`, `addRelated`. **Critical verification tests (do these FIRST, before writing more code):** (1) Test `Zotero.Translate.Search()` with a known DOI — if it fails, confirm the manual metadata fallback works; (2) Create a test annotation via the plugin while a PDF is open in Zotero's reader — verify it appears live without reopening the PDF. If auto-refresh doesn't work, investigate `Zotero.Notifier.trigger('refresh', 'item', [id])`. These two tests de-risk Day 4's "wow features." Test voice conversation about a selected paper. **Deliverable:** Select paper from Zotero → voice conversation about its content; plugin installed with basic write endpoints working; both verification tests passing.
 
-**Day 4 — Annotations + paper discovery (the "wow" features).** Implement `createAnnotation` endpoint with coordinate mapping (Gemini 0-1000 → PDF points). Integrate Gemini bounding box output via `annotate_zotero_pdf` tool. Send page images for vision context. Add Semantic Scholar search integration (`search_academic_papers`, `get_paper_recommendations`). Implement `addPaper` endpoint with DOI lookup. Build text chat mode. **Deliverable:** Live annotation appearing in Zotero during conversation; paper discovery and addition working.
+**Day 4 — Annotations + paper discovery (the "wow" features).** Implement `createAnnotation` endpoint with coordinate mapping (Gemini 0-1000 → PDF points). Integrate Gemini bounding box output via `annotate_zotero_pdf` tool. Send page images for vision context. Add OpenAlex search integration (`search_academic_papers`, `get_paper_recommendations`). Implement `addPaper` endpoint with DOI lookup. Build text chat mode. **Deliverable:** Live annotation appearing in Zotero during conversation; paper discovery and addition working.
 
 **Day 5 — Library management + polish.** Add collection management endpoints (`createCollection`, `addToCollection`). Enable Google Search grounding. Build unified chat UI with voice/text toggle. Implement proactive tag/collection suggestions in system prompt. Error handling (Zotero offline, connection drops, invalid coordinates). **Deliverable:** Feature-complete app with library management.
 
@@ -2083,7 +2070,7 @@ so and offer to search for verification. Your goal is to make the user
 2. **Enter paper mode:** Select a paper from the list, show the context loading
 3. **Voice Q&A:** Ask about the methodology — shows real-time paper understanding + web search grounding
 4. **Library management (quick):** "Tag this as 'signal-loss-analysis' and put it in my thesis collection" — shows Zotero write-back
-5. **Paper discovery:** Agent notices a cited paper, searches Semantic Scholar, offers to add it → user confirms → paper appears in Zotero
+5. **Paper discovery:** Agent notices a cited paper, searches OpenAlex, offers to add it → user confirms → paper appears in Zotero
 6. **THE CLOSER — live annotation:** "What's happening in Figure 3?" → agent describes the figure → purple annotation appears live around the figure in Zotero's PDF reader while the agent is still talking. **This is the moment judges remember. End on this.**
 
 Record backup video. Write README with: BYOK setup instructions (how to get a Gemini API key, expected costs per conversation), architecture overview, local development quickstart (`git clone` → `npm install` → `npm run dev`), Chrome-only note for audio. Add LICENSE files (Apache 2.0 for frontend/backend, AGPL 3.0 for Zotero plugin). Final deploy and smoke test. **Deliverable:** Demo-ready, open-source application.
@@ -2127,7 +2114,7 @@ colloquia/
 │   ├── main.py                   # FastAPI app, WebSocket handler, BYOK key flow
 │   ├── session_handler.py        # Tool orchestration loop, audio forwarding
 │   ├── tools/
-│   │   ├── semantic_scholar.py   # Paper search integration
+│   │   ├── openalex.py   # Paper search integration
 │   │   ├── zotero_proxy.py       # Zotero action relay (backend → frontend → plugin)
 │   │   └── pdf_processing.py     # Page image rendering, coordinate mapping, fulltext quality check
 │   ├── prompts/
@@ -2159,4 +2146,4 @@ colloquia/
 
 - **Colloquia frontend + backend:** Apache 2.0
 - **Zotero Colloquia plugin:** AGPL 3.0 (matching Zotero's own license — plugins that interact with Zotero's internal API should use a compatible copyleft license)
-- **Dependencies:** `google-genai` SDK is Apache 2.0, zotero-plugin-template is AGPL 3.0, Semantic Scholar API is free for non-commercial and commercial use
+- **Dependencies:** `google-genai` SDK is Apache 2.0, zotero-plugin-template is AGPL 3.0, OpenAlex API is free for non-commercial and commercial use

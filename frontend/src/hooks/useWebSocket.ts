@@ -7,7 +7,7 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import toast from "react-hot-toast";
-import { getGeminiKey, getS2Key } from "../lib/apiKeys";
+import { getGeminiKey } from "../lib/apiKeys";
 import { getFallbackUrl } from "../lib/backendUrl";
 import type {
   ServerMessage,
@@ -544,10 +544,6 @@ export function useWebSocket({
           type: "config",
           gemini_api_key: geminiKey,
         };
-        const s2Key: string | null = getS2Key();
-        if (s2Key) {
-          configMsg.s2_api_key = s2Key;
-        }
         ws.send(JSON.stringify(configMsg));
       };
 

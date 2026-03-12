@@ -15,7 +15,7 @@
 - [x] Create GitHub repository `colloquia` (Apache 2.0 license) — https://github.com/kartikmandar/colloquia
 - [x] Set up monorepo structure: `frontend/`, `backend/`, `zotero-colloquia-plugin/`
 - [x] Obtain Gemini API key — from GCP project `colloquia-app`, stored in `backend/.env`
-- [ ] Obtain Semantic Scholar API key (optional, for higher rate limits) — skipped for now
+- [ ] Obtain OpenAlex API key (optional, for higher rate limits) — skipped for now
 - [x] Install Zotero 7 desktop and verify local API at `localhost:23119`
 - [x] Populate Zotero library with test papers — 100+ papers already present (HERA, 21cm, radio astro)
 - [x] Install Google Cloud CLI (`gcloud`) and authenticate — v556.0.0, enroliaeducation@gmail.com
@@ -73,10 +73,10 @@
 - [x] Export shared types for both frontend and backend consumption — supporting types: `PaperMetadata`, `PaperAnnotation`, `PageImage`
 
 ### 1.4 BYOK API Key Management
-- [x] Create `src/lib/apiKeys.ts` — `getGeminiKey`, `setGeminiKey`, `getS2Key`, `setS2Key`, `clearAllKeys`, `hasGeminiKey`; localStorage keys: `colloquia_gemini_key`, `colloquia_s2_key`
+- [x] Create `src/lib/apiKeys.ts` — `getGeminiKey`, `setGeminiKey`, `clearAllKeys`, `hasGeminiKey`; localStorage key: `colloquia_gemini_key`
 - [x] Build `SetupScreen` component:
   - Gemini API key input (required, password type with show/hide toggle)
-  - Semantic Scholar API key input (optional, with toggle)
+  - OpenAlex API key input (optional, with toggle)
   - "Your API key is stored locally in your browser" privacy notice
   - Validation: format check (starts with "AI", >20 chars), loading state on button
   - "Get Started" button → persist to localStorage → call onComplete()
@@ -431,20 +431,20 @@
 - [x] System prompt instructs use of `annotate_zotero_pdf` when discussing figures
 - [ ] Test: ask about a figure → verify annotation appears in Zotero reader
 
-### 4.2 Paper Discovery via Semantic Scholar
+### 4.2 Paper Discovery via OpenAlex
 
-#### 4.2.1 Backend: Semantic Scholar Integration
-- [x] Created `backend/tools/semantic_scholar.py` with async httpx:
+#### 4.2.1 Backend: OpenAlex Integration
+- [x] Created `backend/tools/openalex.py` with async httpx:
   - `search_academic_papers(query, year, limit, api_key)` — searches `/graph/v1/paper/search`
   - `get_paper_by_doi(doi, api_key)` — fetches `/graph/v1/paper/DOI:{doi}` with references/citations
   - `get_paper_recommendations(paper_id, limit, api_key)` — `POST /recommendations/v1/papers/`
-- [x] API key support via `x-api-key` header (passed from config message `s2_api_key`)
+- [x] Uses polite pool via `mailto` header (no API key needed)
 - [x] Error handling: timeouts, rate limits (429), 404s, network failures
 
 #### 4.2.2 Backend: Register Discovery Tools
 - [x] Added `search_academic_papers` and `get_paper_recommendations` to `TOOL_REGISTRY`
 - [x] Added function declarations to `TOOL_DECLARATIONS`
-- [x] S2 API key passed through from config message to tool calls
+- [x] OpenAlex requires no API key — uses mailto-based polite pool
 
 #### 4.2.3 Plugin: `addPaper` Endpoint
 - [x] `POST /colloquia/addPaper`:
@@ -515,7 +515,7 @@
 - [x] Model name displayed in chat UI
 - [x] Typing indicator during response generation
 - [ ] Live annotation appearing in Zotero during voice conversation (needs E2E test)
-- [ ] Paper discovery: search Semantic Scholar → add to Zotero (needs E2E test)
+- [ ] Paper discovery: search OpenAlex → add to Zotero (needs E2E test)
 - [ ] `deep_analysis` delegation to Pro model functional (needs E2E test)
 
 ---
@@ -594,7 +594,7 @@
 - [ ] Wire tool errors to toast notifications:
   - `tool_call` with `status: "error"` → toast with tool name + error message
 - [ ] Specific error toasts:
-  - Semantic Scholar down → "Paper search unavailable"
+  - OpenAlex down → "Paper search unavailable"
   - Annotation coord failure → "Annotation placement failed"
   - Zotero plugin timeout → "Zotero didn't respond — is it running?"
   - Deep analysis failure → "Advanced analysis unavailable"
@@ -680,7 +680,7 @@
   - Agent confirms, executes, shows result
 - [ ] **Act 5: Paper Discovery (~1 min)**
   - Agent notices a cited paper during discussion
-  - Searches Semantic Scholar → shows citation count
+  - Searches OpenAlex → shows citation count
   - Checks library → not found → offers to add
   - User confirms → paper appears in Zotero
 - [ ] **Act 6: THE CLOSER — Live Annotation (~1 min)**
@@ -705,7 +705,7 @@
 - [ ] BYOK setup instructions:
   - How to get a Gemini API key (link to aistudio.google.com)
   - Expected costs per conversation (~$0.02-0.05)
-  - Semantic Scholar API key (optional)
+  - OpenAlex API key (optional)
 - [ ] Local development quickstart:
   ```
   git clone ... && cd colloquia
@@ -793,7 +793,7 @@
 | 7 | Token limit exceeded (128K) | Low | Medium | Monitor usage, truncate old conversation | Summarize + start new session |
 | 8 | Gemini bounding box inaccuracy | Medium | Low | Validate coords (reject zeros/OOB) | "Annotation placed approximately" |
 | 9 | Safari audio issues | Low | Low | Chrome-only for demo | Note in README |
-| 10 | Semantic Scholar rate limits hit | Low | Low | Cache results, 100 req/5min is generous | Fall back to Google Search |
+| 10 | OpenAlex rate limits hit | Low | Low | Cache results, 100 req/5min is generous | Fall back to Google Search |
 | 11 | Context window compression audio bug | Known | High | Skip compression entirely | 15-min sessions fit without it |
 | 12 | Network issues during live demo | Medium | Critical | Backup video ready | Play video, explain live |
 
@@ -828,7 +828,7 @@ Phase 3 (Day 3): Paper Context + Plugin [depends on Phase 2]
 
 Phase 4 (Day 4): Annotations + Discovery [depends on Phase 3]
   ├── createAnnotation endpoint + coord mapping
-  ├── Semantic Scholar integration
+  ├── OpenAlex integration
   ├── addPaper endpoint (DOI + manual)
   ├── Text chat mode (generateContent)
   ├── ConversationState (shared voice/text)
@@ -859,7 +859,7 @@ Phase 6 (Day 6): Demo Prep [depends on Phase 5]
 | Phase 1 | Day 1 | 28 | Vite proxy + WebSocket protocol + backend deploy |
 | Phase 2 | Day 2 | 24 | Audio pipeline + tool orchestration loop |
 | Phase 3 | Day 3 | 25 | Critical tests + plugin MVP + delegation pattern |
-| Phase 4 | Day 4 | 24 | Annotations + Semantic Scholar + text mode |
+| Phase 4 | Day 4 | 24 | Annotations + OpenAlex + text mode |
 | Phase 5 | Day 5 | 26 | Library management + error UX + session resumption |
 | Phase 6 | Day 6 | 22 | Demo script + testing + documentation |
 | Cross-cutting | All | 17 | Testing, security, accessibility |
