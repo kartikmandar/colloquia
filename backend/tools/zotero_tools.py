@@ -336,9 +336,42 @@ def create_zotero_tools(
         """
         return await _delegate_to_frontend(ws, "getItem", {"itemKey": itemKey}, ctx)
 
+    async def get_paper_fulltext(itemKey: str, maxChars: int = 0) -> dict[str, Any]:
+        """Read the full text content of a paper from its PDF in Zotero.
+
+        Use this when the user asks you to read, explain, or discuss specific
+        sections of a paper (introduction, methods, results, etc.). Returns the
+        extracted text from the PDF attachment.
+
+        Pass the parent item key (from search results); the frontend will
+        automatically find the PDF attachment and extract its text.
+
+        Args:
+            itemKey: The Zotero item key of the paper (parent item, not PDF attachment).
+            maxChars: Maximum characters to return (0 = full text, up to 100k). Useful for getting just the beginning of a paper.
+        """
+        result: dict[str, Any] = await _delegate_to_frontend(
+            ws, "getFulltext", {"itemKey": itemKey}, ctx
+        )
+        content: str = result.get("content", "")
+        if not content:
+            return {"error": "No full text available. The paper may not have a PDF attachment, or the PDF has not been indexed by Zotero yet."}
+
+        effective_max: int = maxChars if maxChars > 0 else 100_000
+        if len(content) > effective_max:
+            content = content[:effective_max] + "\n\n[... text truncated ...]"
+
+        return {
+            "content": content,
+            "totalChars": result.get("totalChars", len(content)),
+            "indexedPages": result.get("indexedPages"),
+            "totalPages": result.get("totalPages"),
+        }
+
     return [
         search_zotero_library,
         get_item_details,
+        get_paper_fulltext,
         create_note,
         manage_tags,
         link_related_items,

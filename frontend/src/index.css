@@ -337,6 +337,18 @@ body {
 }
 
 /* Images */
+/* KaTeX math equations */
+.markdown-prose .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5em 0;
+}
+
+.markdown-prose .katex {
+  color: inherit;
+  font-size: 1.05em;
+}
+
 .markdown-prose img {
   max-width: 100%;
   border-radius: 6px;

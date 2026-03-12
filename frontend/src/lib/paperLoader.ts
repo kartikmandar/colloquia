@@ -6,7 +6,6 @@
 import {
   fetchItemDetails,
   fetchItemChildren,
-  fetchItemFulltext,
   extractYear,
   getVenue,
 } from "./zoteroApi";
@@ -45,13 +44,22 @@ export async function loadPaper(paperKey: string): Promise<LoadPaperResult> {
       child.data.contentType === "application/pdf",
   );
 
-  // Fetch fulltext from the PDF attachment (not the parent item)
+  // Fetch fulltext via the plugin endpoint (Zotero's REST API doesn't support /fulltext)
   let fulltext: string = "";
-  if (pdfAttachment) {
-    const ft: string | null = await fetchItemFulltext(pdfAttachment.key);
-    if (ft) {
-      fulltext = ft;
+  try {
+    const ftResponse: Response = await fetch("/zotero-plugin/colloquia/getFulltext", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemKey: paperKey }),
+    });
+    if (ftResponse.ok) {
+      const ftData: { content?: string } = await ftResponse.json();
+      if (ftData.content) {
+        fulltext = ftData.content;
+      }
     }
+  } catch {
+    // Fulltext fetch failed — non-critical, continue without it
   }
 
   // Extract annotations from children

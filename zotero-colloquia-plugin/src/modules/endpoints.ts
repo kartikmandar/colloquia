@@ -488,7 +488,12 @@ class GetItemEndpoint {
       const attachmentIDs = item.getAttachments();
       attachmentCount = attachmentIDs.length;
 
-      // Count annotations across PDF attachments
+      // Count annotations across PDF attachments and get fulltext info
+      let hasFulltext = false;
+      let fulltextLength = 0;
+      let indexedPages: number | null = null;
+      let totalPages: number | null = null;
+
       if (attachmentIDs.length > 0) {
         const attachments = await Zotero.Items.getAsync(attachmentIDs);
         for (const att of attachments) {
@@ -499,6 +504,28 @@ class GetItemEndpoint {
             } catch {
               // getAnnotations may not be available
             }
+
+            // Get fulltext length from the first PDF attachment
+            if (!hasFulltext) {
+              try {
+                const cacheFile = Zotero.Fulltext.getItemCacheFile(att);
+                if (cacheFile.exists()) {
+                  const content = await Zotero.File.getContentsAsync(cacheFile.path) as string;
+                  if (content) {
+                    hasFulltext = true;
+                    fulltextLength = content.length;
+                  }
+                }
+                const pageInfo = await Zotero.Fulltext.getPages(att.id);
+                if (pageInfo) {
+                  totalPages = pageInfo.total;
+                }
+                const idxState = await Zotero.Fulltext.getIndexedState(att);
+                indexedPages = idxState === Zotero.Fulltext.INDEX_STATE_INDEXED ? totalPages : null;
+              } catch {
+                // Fulltext not available for this attachment
+              }
+            }
           }
         }
       }
@@ -506,6 +533,10 @@ class GetItemEndpoint {
       metadata.noteCount = noteCount;
       metadata.attachmentCount = attachmentCount;
       metadata.annotationCount = annotationCount;
+      metadata.hasFulltext = hasFulltext;
+      metadata.fulltextLength = fulltextLength;
+      metadata.indexedPages = indexedPages;
+      metadata.totalPages = totalPages;
 
       // Collections
       try {
@@ -532,6 +563,101 @@ class GetItemEndpoint {
       return jsonResponse(200, metadata);
     } catch (e: any) {
       ztoolkit.log(`getItem error: ${e.message}`);
+      return jsonResponse(500, { error: e.message });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Endpoint: POST /colloquia/getFulltext — Read full text from PDF cache
+// ---------------------------------------------------------------------------
+
+class GetFulltextEndpoint {
+  supportedMethods = ["POST"];
+  supportedDataTypes = ["application/json"];
+  permitBookmarklet = false;
+
+  async init(
+    request: Record<string, any>,
+  ): Promise<[number, string, string]> {
+    try {
+      const body = parseBody(request.data);
+      const { itemKey } = body;
+
+      if (!itemKey) {
+        return jsonResponse(400, {
+          error: "Missing required field: itemKey",
+        });
+      }
+
+      const libID = Zotero.Libraries.userLibraryID;
+      const item = await Zotero.Items.getByLibraryAndKeyAsync(libID, itemKey);
+
+      if (!item) {
+        return jsonResponse(404, { error: `Item not found: ${itemKey}` });
+      }
+
+      // Find the PDF attachment
+      const attachmentIDs = item.getAttachments();
+      let pdfAttachment: any = null;
+
+      if (attachmentIDs.length > 0) {
+        const attachments = await Zotero.Items.getAsync(attachmentIDs);
+        for (const att of attachments) {
+          if ((att as any).attachmentContentType === "application/pdf") {
+            pdfAttachment = att;
+            break;
+          }
+        }
+      }
+
+      if (!pdfAttachment) {
+        return jsonResponse(200, {
+          content: "",
+          hasFulltext: false,
+          error: "No PDF attachment found for this item",
+        });
+      }
+
+      // Read fulltext from cache file
+      let content = "";
+      let totalPages: number | null = null;
+
+      try {
+        const cacheFile = Zotero.Fulltext.getItemCacheFile(pdfAttachment);
+        if (cacheFile.exists()) {
+          content = await Zotero.File.getContentsAsync(cacheFile.path) as string;
+        }
+      } catch {
+        // Cache file not available
+      }
+
+      try {
+        const pageInfo = await Zotero.Fulltext.getPages(pdfAttachment.id);
+        if (pageInfo) {
+          totalPages = pageInfo.total;
+        }
+      } catch {
+        // Page info not available
+      }
+
+      if (!content) {
+        return jsonResponse(200, {
+          content: "",
+          hasFulltext: false,
+          totalPages,
+          error: "PDF is not indexed. Try opening it in Zotero first.",
+        });
+      }
+
+      return jsonResponse(200, {
+        content,
+        totalChars: content.length,
+        hasFulltext: true,
+        totalPages,
+      });
+    } catch (e: any) {
+      ztoolkit.log(`getFulltext error: ${e.message}`);
       return jsonResponse(500, { error: e.message });
     }
   }
@@ -1303,6 +1429,7 @@ export function registerEndpoints(): void {
     "/colloquia/getAnnotations": GetAnnotationsEndpoint,
     "/colloquia/trashItems": TrashItemsEndpoint,
     "/colloquia/getItem": GetItemEndpoint,
+    "/colloquia/getFulltext": GetFulltextEndpoint,
   };
 
   for (const [path, EndpointClass] of Object.entries(endpoints)) {
