@@ -21,6 +21,7 @@ from model_registry import MODEL_REGISTRY, get_registry_json, ModelEntry
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
 from tools.local_tools import search_academic_papers, get_paper_recommendations
+from tools.web_search import create_web_search_tool
 from tools.zotero_tools import create_zotero_tools, resolve_zotero_result
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -654,13 +655,26 @@ async def handle_text_message(
             if model_supports_tools:
                 zotero_tool_funcs: list[Any] = create_zotero_tools(ws, bundle.zotero_ctx)
                 local_tool_funcs: list[Any] = [search_academic_papers, get_paper_recommendations]
-                all_tool_funcs = zotero_tool_funcs + local_tool_funcs
+                web_search_fn = create_web_search_tool(api_key)
+                all_tool_funcs = zotero_tool_funcs + local_tool_funcs + [web_search_fn]
                 tool_map = {func.__name__: func for func in all_tool_funcs}
             else:
                 # Append a note to system instruction that tools are unavailable
                 system_instruction += (
                     "\n\nNote: Tool integrations (Zotero, OpenAlex) are not available "
                     "with this model. Respond based on your knowledge only."
+                )
+
+            # Always-on web search guidance (search_web is a custom tool)
+            if model_supports_tools:
+                system_instruction += (
+                    "\n\n## Web Search\n"
+                    "You have a `search_web` tool for real-time web information via Google Search.\n"
+                    "Use it when:\n"
+                    "- The user explicitly asks to search the web\n"
+                    "- You need current/recent information beyond your training data\n"
+                    "- Academic search (OpenAlex) returns insufficient results\n"
+                    "Do NOT use it for every query — prefer OpenAlex for academic papers."
                 )
 
             # Build new user message
@@ -702,7 +716,6 @@ async def handle_text_message(
                             config_kwargs["automatic_function_calling"] = (
                                 genai.types.AutomaticFunctionCallingConfig(disable=True)
                             )
-
                         stream = await client.aio.models.generate_content_stream(
                             model=model_name,
                             contents=context_contents,
