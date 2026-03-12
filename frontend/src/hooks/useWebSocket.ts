@@ -69,6 +69,7 @@ interface UseWebSocketReturn {
   sendPaperContext: (payload: Record<string, unknown>) => void;
   sendControl: (action: string, mode?: string) => void;
   sendModelSwitch: (modelId: string, mode: "voice" | "text") => void;
+  sendChatModeSwitch: (mode: "voice" | "text") => void;
 }
 
 let messageIdCounter: number = 0;
@@ -673,6 +674,13 @@ export function useWebSocket({
     [sendRaw],
   );
 
+  const sendChatModeSwitch = useCallback(
+    (mode: "voice" | "text"): void => {
+      sendRaw({ type: "chat_mode_switch", mode });
+    },
+    [sendRaw],
+  );
+
   const sendModelSwitch = useCallback(
     (modelId: string, mode: "voice" | "text"): void => {
       setIsModelSwitching(true);
@@ -746,5 +754,6 @@ export function useWebSocket({
     sendPaperContext,
     sendControl,
     sendModelSwitch,
+    sendChatModeSwitch,
   };
 }

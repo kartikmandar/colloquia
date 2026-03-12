@@ -94,6 +94,7 @@ function MainApp({
     stopTextGeneration,
     isTextGenerating,
     sendModelSwitch,
+    sendChatModeSwitch,
   } = useWebSocket({
     url: wsUrl,
     onAudioData: handleAudioFromServer,
@@ -107,6 +108,25 @@ function MainApp({
   const { isCapturing, volume, startCapture, stopCapture } = useAudioCapture({
     onAudioData: sendAudio,
   });
+
+  const handleModeSwitch = useCallback((): void => {
+    const newMode: "voice" | "text" =
+      chatMode === "voice" ? "text" : "voice";
+    // Stop mic if switching away from voice
+    if (chatMode === "voice" && isCapturing) {
+      stopCapture();
+    }
+    // Stop audio playback if switching to text
+    if (newMode === "text") {
+      audioStreamerRef.current?.stop();
+    }
+    sendChatModeSwitch(newMode);
+    setChatMode(newMode);
+  }, [chatMode, isCapturing, stopCapture, sendChatModeSwitch]);
+
+  const filteredMessages = messages.filter(
+    (m) => m.mode === chatMode,
+  );
 
   const handlePaperSelect = useCallback((paperKey: string): void => {
     setSelectedPaperKey(paperKey);
@@ -355,7 +375,7 @@ function MainApp({
               {/* Chat messages */}
               <div className="flex-1 overflow-hidden">
                 <ChatPanel
-                  messages={messages}
+                  messages={filteredMessages}
                   onSendText={sendText}
                   onStopGeneration={stopTextGeneration}
                   isConnected={isConnected}
@@ -367,9 +387,7 @@ function MainApp({
               {/* Input area */}
               <div className="flex items-center gap-2 border-t border-border-primary px-3 py-3">
                 <button
-                  onClick={() =>
-                    setChatMode(chatMode === "voice" ? "text" : "voice")
-                  }
+                  onClick={handleModeSwitch}
                   className="rounded-lg p-2 text-text-secondary transition-all hover:bg-surface-tertiary active:scale-[0.98]"
                   title={
                     chatMode === "voice"

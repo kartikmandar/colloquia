@@ -92,6 +92,12 @@ export interface ModelSwitchMessage {
   transcriptContext?: string[];
 }
 
+/** Request to switch between voice and text chat modes (clears history) */
+export interface ChatModeSwitchMessage {
+  type: "chat_mode_switch";
+  mode: "voice" | "text";
+}
+
 export type ClientMessage =
   | ConfigMessage
   | AudioMessage
@@ -99,7 +105,8 @@ export type ClientMessage =
   | PaperContextMessage
   | ZoteroActionResultMessage
   | ControlMessage
-  | ModelSwitchMessage;
+  | ModelSwitchMessage
+  | ChatModeSwitchMessage;
 
 // ------------------------------------------------------------
 // Server messages (backend -> frontend)

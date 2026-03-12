@@ -178,6 +178,34 @@ async def run_session(
                                 # The server detects speech start/end automatically.
                                 logger.info("audio_stream_end received (auto-detection handles this)")
 
+                        elif msg_type == "chat_mode_switch":
+                            switch_to: str = raw.get("mode", "")
+                            logger.info("Chat mode switch to: %s", switch_to)
+                            if switch_to == "text":
+                                # Clear text chat history for a fresh conversation
+                                bundle.text_chat_history.clear()
+                                # Re-inject paper context summary if a paper is loaded
+                                if bundle.session.state.get("session_mode") == "paper":
+                                    pc = bundle.session.state.get("paper_context", {})
+                                    if pc:
+                                        from google import genai as _genai
+                                        bundle.text_chat_history.append(
+                                            _genai.types.Content(
+                                                role="user",
+                                                parts=[_genai.types.Part.from_text(
+                                                    text=(
+                                                        f"[Paper context: \"{pc.get('title', '')}\" "
+                                                        f"by {pc.get('authors', '')} ({pc.get('year', '')})]"
+                                                    )
+                                                )],
+                                            )
+                                        )
+                            elif switch_to == "voice":
+                                # Restart voice live session (fresh conversation)
+                                # Closing the queue ends run_live(); the outer loop
+                                # will reconnect with a fresh session.
+                                live_queue.close()
+
                         elif msg_type == "model_switch":
                             requested_model: str = raw.get("modelId", "")
                             switch_mode: str = raw.get("mode", "")
@@ -489,17 +517,6 @@ async def handle_paper_load(
     session.state["session_mode"] = "paper"
     session.state["paper_context"] = paper_context
 
-    # Inject a separator into text chat history (preserve across mode switches)
-    from google import genai as _genai
-    bundle.text_chat_history.append(
-        _genai.types.Content(
-            role="user",
-            parts=[_genai.types.Part.from_text(
-                text=f"[Context switched to paper: {metadata.get('title', 'Unknown')}]"
-            )],
-        )
-    )
-
     # Inject paper content as user message via LiveRequestQueue
     context_parts: list[types.Part] = []
 
@@ -568,17 +585,6 @@ async def handle_switch_to_lobby(
     """Switch the session back to lobby mode."""
     bundle.session.state["session_mode"] = "lobby"
     bundle.session.state["paper_context"] = {}
-
-    # Inject a separator into text chat history (preserve across mode switches)
-    from google import genai as _genai
-    bundle.text_chat_history.append(
-        _genai.types.Content(
-            role="user",
-            parts=[_genai.types.Part.from_text(
-                text="[Returned to library browsing]"
-            )],
-        )
-    )
 
     live_queue.send_content(
         types.Content(
