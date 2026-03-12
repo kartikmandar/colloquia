@@ -47,11 +47,11 @@ function ToolCallBadge({
   const duration: string = formatDuration(durationMs);
 
   return (
-    <div className="mt-1">
+    <div className="mt-1 animate-fade-in-up">
       <button
         type="button"
         onClick={(): void => setExpanded(!expanded)}
-        className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-colors ${
+        className={`flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition-all hover:shadow-sm active:scale-[0.98] ${
           status === "error"
             ? "bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
             : "bg-surface-tertiary text-text-secondary hover:bg-border-primary"
@@ -75,7 +75,7 @@ function ToolCallBadge({
       </button>
 
       {expanded && (
-        <div className="mt-1 max-h-64 overflow-y-auto rounded-lg border border-border-primary bg-surface-secondary p-2 text-xs">
+        <div className="mt-1 max-h-64 animate-fade-in-up overflow-y-auto rounded-lg border border-border-primary bg-surface-secondary p-2 text-xs">
           {input && Object.keys(input).length > 0 && (
             <div className="mb-1.5">
               <span className="font-semibold text-text-secondary">Input:</span>

@@ -1,12 +1,12 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 80" width="520" height="80">
   <defs>
     <linearGradient id="tg" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#7c5cbf" />
+      <stop offset="0%" style="stop-color:#6d4aaa" />
       <stop offset="100%" style="stop-color:#a28ae5" />
     </linearGradient>
   </defs>
   <text x="260" y="58" text-anchor="middle"
-        font-family="'Georgia', 'Times New Roman', serif"
+        font-family="'Crimson Pro', Georgia, 'Times New Roman', serif"
         font-size="56" font-weight="700" letter-spacing="6"
         fill="url(#tg)">
     COLLOQUIA

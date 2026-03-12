@@ -31,12 +31,12 @@ function ContextUsageBar({
 
   return (
     <div
-      className="flex items-center gap-1.5"
+      className="flex items-center gap-1.5 transition-all"
       title={`${displayTotal} / ${displayMax} tokens`}
     >
       <div className="h-1.5 w-16 overflow-hidden rounded-full bg-surface-tertiary">
         <div
-          className={`h-full rounded-full transition-all ${colorClass}`}
+          className={`h-full rounded-full transition-all duration-500 ${colorClass}`}
           style={{ width: `${percentage}%` }}
         />
       </div>

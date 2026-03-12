@@ -6,6 +6,7 @@ import type { ConnectionStatus } from "../hooks/useWebSocket";
 
 interface ConnectionBadgeProps {
   status: ConnectionStatus;
+  url?: string;
 }
 
 const STATUS_CONFIG: Record<
@@ -18,11 +19,13 @@ const STATUS_CONFIG: Record<
   disconnected: { color: "bg-red-500", pulse: false, label: "Disconnected" },
 };
 
-function ConnectionBadge({ status }: ConnectionBadgeProps): React.ReactElement {
+function ConnectionBadge({ status, url }: ConnectionBadgeProps): React.ReactElement {
   const config = STATUS_CONFIG[status];
+  const isLocal: boolean = url ? url.includes("localhost") : false;
+  const locationLabel: string = url ? (isLocal ? "local" : "cloud") : "";
 
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex items-center gap-1.5" title={url}>
       <span className="relative flex h-2.5 w-2.5">
         {config.pulse && (
           <span
@@ -30,10 +33,15 @@ function ConnectionBadge({ status }: ConnectionBadgeProps): React.ReactElement {
           />
         )}
         <span
-          className={`relative inline-flex h-2.5 w-2.5 rounded-full ${config.color}`}
+          className={`relative inline-flex h-2.5 w-2.5 rounded-full transition-all duration-300 ${config.color}`}
         />
       </span>
-      <span className="text-xs text-text-secondary">{config.label}</span>
+      <span className="text-xs text-text-secondary">
+        {config.label}
+        {locationLabel && status !== "disconnected" && (
+          <span className="text-text-tertiary"> ({locationLabel})</span>
+        )}
+      </span>
     </div>
   );
 }

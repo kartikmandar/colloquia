@@ -39,6 +39,8 @@ function MainApp({
   const maskedKey: string = geminiKey
     ? geminiKey.substring(0, 8).replace(/./g, "*")
     : "";
+  // suppress unused warning — kept for potential future use
+  void maskedKey;
   const { state: zoteroState, refresh: zoteroRefresh } = useZoteroHealth();
 
   const [, setSelectedPaperKey] = useState<string | null>(null);
@@ -185,25 +187,25 @@ function MainApp({
         }}
       />
       {/* Top bar */}
-      <header className="relative z-20 flex items-center justify-between border-b border-border-primary bg-surface-primary/80 px-6 py-3 backdrop-blur-sm">
-        <img src="/logo.svg" alt="Colloquia" className="h-7" />
+      <header className="relative z-20 flex items-center justify-between border-b-2 border-border-primary bg-surface-primary/80 px-6 py-2.5 shadow-soft backdrop-blur-sm">
+        {/* Left: Logo */}
+        <img src="/logo.svg" alt="Colloquia" className="h-8" />
 
+        {/* Right: grouped with dividers */}
         <div className="flex items-center gap-3">
-          <ConnectionBadge status={status} />
-          {status !== "disconnected" && (
-            <span
-              className="text-xs text-text-tertiary max-w-32 truncate"
-              title={activeUrl}
-            >
-              {activeUrl.includes("localhost") ? "local" : "cloud"}
-            </span>
-          )}
+          {/* Group 1: Connection + Context */}
+          <ConnectionBadge status={status} url={activeUrl} />
           {contextUsage && (
             <ContextUsageBar
               totalTokens={contextUsage.totalTokens}
               maxTokens={contextUsage.maxTokens}
             />
           )}
+
+          {/* Divider */}
+          <div className="h-5 w-px bg-border-primary" />
+
+          {/* Group 2: Model + Actions */}
           <ModelSelector
             modelList={modelList}
             currentMode={chatMode}
@@ -213,25 +215,25 @@ function MainApp({
           />
           <button
             onClick={handleConnect}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all active:scale-[0.98] ${
               isConnected
                 ? "bg-red-50 text-red-600 hover:bg-red-100 dark:bg-red-950 dark:text-red-400 dark:hover:bg-red-900"
-                : "bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+                : "bg-accent-primary/10 text-accent-primary hover:bg-accent-primary/20"
             }`}
           >
             {isConnected ? "Disconnect" : "Connect"}
           </button>
+
+          {/* Divider */}
+          <div className="h-5 w-px bg-border-primary" />
+
           <ZoteroStatus state={zoteroState} onRefresh={zoteroRefresh} />
-          {maskedKey && (
-            <span className="text-xs font-mono text-text-tertiary">
-              {maskedKey}
-            </span>
-          )}
+
           {/* Theme toggle */}
           <button
             onClick={themeState.toggleTheme}
             aria-label="Toggle theme"
-            className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-tertiary"
+            className="rounded-lg p-2 text-text-secondary transition-all hover:bg-surface-tertiary active:scale-[0.98]"
           >
             {themeState.theme === "light" ? (
               <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -250,7 +252,7 @@ function MainApp({
           <button
             onClick={onBackToSetup}
             aria-label="Settings"
-            className="rounded-lg border border-border-primary p-2 text-text-secondary transition-colors hover:bg-surface-tertiary hover:text-text-primary"
+            className="rounded-lg border border-border-primary p-2 text-text-secondary transition-all hover:bg-surface-tertiary hover:text-text-primary active:scale-[0.98]"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
@@ -285,7 +287,7 @@ function MainApp({
             <div className="flex h-full flex-col bg-surface-primary">
               {/* Paper loading indicator */}
               {paperLoading && (
-                <div className="flex items-center gap-2 border-b border-blue-100 bg-blue-50 px-4 py-2 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-300">
+                <div className="flex animate-fade-in-up items-center gap-2 border-b border-accent-primary/20 bg-accent-primary/5 px-4 py-2 text-sm text-accent-primary">
                   <svg
                     className="h-4 w-4 animate-spin"
                     viewBox="0 0 24 24"
@@ -309,7 +311,7 @@ function MainApp({
                 </div>
               )}
               {loadedPaperTitle && !paperLoading && (
-                <div className="flex items-center justify-between border-b border-purple-100 bg-purple-50 px-4 py-2 text-xs text-purple-700 dark:border-purple-900 dark:bg-purple-950 dark:text-purple-300">
+                <div className="flex animate-fade-in-up items-center justify-between border-b border-purple-100 bg-purple-50 px-4 py-2 text-xs text-purple-700 dark:border-purple-900 dark:bg-purple-950 dark:text-purple-300">
                   <span
                     className="font-medium truncate"
                     title={loadedPaperTitle}
@@ -318,7 +320,7 @@ function MainApp({
                   </span>
                   <button
                     onClick={handleBackToLibrary}
-                    className="ml-2 shrink-0 rounded-lg px-2 py-0.5 text-xs font-medium text-purple-600 transition-colors hover:bg-purple-200 dark:text-purple-400 dark:hover:bg-purple-900"
+                    className="ml-2 shrink-0 rounded-lg px-2 py-0.5 text-xs font-medium text-purple-600 transition-all hover:bg-purple-200 active:scale-[0.98] dark:text-purple-400 dark:hover:bg-purple-900"
                   >
                     Back to Library
                   </button>
@@ -340,7 +342,7 @@ function MainApp({
                 const currentModel = allNonVoice.find((m) => m.modelId === currentTextModelId);
                 if (currentModel && !currentModel.capabilities.supportsTools) {
                   return (
-                    <div className="flex items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-1.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
+                    <div className="flex animate-fade-in-up items-center gap-2 border-b border-amber-100 bg-amber-50 px-4 py-1.5 text-xs text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
                       <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                       </svg>
@@ -368,7 +370,7 @@ function MainApp({
                   onClick={() =>
                     setChatMode(chatMode === "voice" ? "text" : "voice")
                   }
-                  className="rounded-lg p-2 text-text-secondary transition-colors hover:bg-surface-tertiary"
+                  className="rounded-lg p-2 text-text-secondary transition-all hover:bg-surface-tertiary active:scale-[0.98]"
                   title={
                     chatMode === "voice"
                       ? "Switch to text mode"
@@ -416,9 +418,9 @@ function MainApp({
           </Panel>
         </Group>
         {sessionEnded && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/50">
-            <div className="rounded-xl bg-surface-primary p-6 shadow-overlay text-center max-w-sm">
-              <h2 className="text-lg font-semibold text-text-primary mb-2">
+          <div className="absolute inset-0 z-50 flex animate-fade-in items-center justify-center bg-black/50">
+            <div className="animate-scale-in rounded-2xl bg-surface-primary p-6 shadow-elevated text-center max-w-sm">
+              <h2 className="font-display text-xl font-semibold text-text-primary mb-2">
                 Session Ended
               </h2>
               <p className="text-sm text-text-secondary mb-4">
@@ -429,7 +431,7 @@ function MainApp({
                   setSessionEnded(false);
                   connect();
                 }}
-                className="rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover"
+                className="rounded-lg bg-gradient-to-r from-[#6d4aaa] to-[#a28ae5] px-4 py-2 text-sm font-medium text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
               >
                 Start New Session
               </button>

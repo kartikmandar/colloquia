@@ -15,34 +15,52 @@ function MicButton({
   volume,
   onToggle,
 }: MicButtonProps): React.ReactElement {
-  // Scale ring size based on volume (0-1 range, capped)
-  const ringScale: number = 1 + Math.min(volume * 8, 0.6);
+  // Scale rings based on volume (0-1 range, capped)
+  const ringScale1: number = 1 + Math.min(volume * 6, 0.4);
+  const ringScale2: number = 1 + Math.min(volume * 10, 0.6);
+  const ringScale3: number = 1 + Math.min(volume * 14, 0.8);
 
   return (
     <button
       onClick={onToggle}
       disabled={!isConnected}
       aria-label={isCapturing ? "Stop microphone" : "Start microphone"}
-      className={`relative flex h-16 w-16 items-center justify-center rounded-full transition-all duration-150 ${
+      className={`relative flex h-20 w-20 items-center justify-center rounded-full transition-all duration-200 ${
         isCapturing
-          ? "bg-red-500 text-white shadow-lg shadow-red-200 hover:bg-red-600 dark:shadow-red-900/30"
+          ? "bg-gradient-to-br from-red-500 to-red-600 text-white shadow-xl shadow-red-300/30 hover:from-red-600 hover:to-red-700 dark:shadow-red-900/30"
           : isConnected
-            ? "bg-accent-primary text-white shadow-lg shadow-blue-200 hover:bg-accent-primary-hover dark:shadow-blue-900/30"
+            ? "bg-gradient-to-br from-[#6d4aaa] to-[#a28ae5] text-white shadow-xl shadow-accent-primary/20 hover:from-[#5c3d94] hover:to-[#9478d8] dark:shadow-accent-primary/20"
             : "bg-surface-tertiary text-text-tertiary cursor-not-allowed"
       }`}
     >
-      {/* Volume ring */}
-      {isCapturing && (
-        <span
-          className="absolute inset-0 rounded-full bg-red-400 opacity-30 transition-transform duration-100"
-          style={{ transform: `scale(${ringScale})` }}
-        />
+      {/* Idle breathing pulse */}
+      {!isCapturing && isConnected && (
+        <span className="absolute inset-0 rounded-full bg-accent-primary/20 animate-pulse-ring" />
       )}
+
+      {/* Multi-ring volume visualization */}
+      {isCapturing && (
+        <>
+          <span
+            className="absolute inset-0 rounded-full bg-red-400/25 transition-transform duration-75"
+            style={{ transform: `scale(${ringScale1})` }}
+          />
+          <span
+            className="absolute inset-0 rounded-full bg-red-400/15 transition-transform duration-100"
+            style={{ transform: `scale(${ringScale2})` }}
+          />
+          <span
+            className="absolute inset-0 rounded-full bg-red-400/8 transition-transform duration-150"
+            style={{ transform: `scale(${ringScale3})` }}
+          />
+        </>
+      )}
+
       {/* Mic icon */}
-      <svg className="relative h-7 w-7" viewBox="0 0 20 20" fill="currentColor">
+      <svg className="relative h-8 w-8" viewBox="0 0 20 20" fill="currentColor">
         {isCapturing ? (
           // Stop icon (square)
-          <rect x="6" y="6" width="8" height="8" rx="1" />
+          <rect x="6" y="6" width="8" height="8" rx="1.5" />
         ) : (
           // Mic icon
           <path

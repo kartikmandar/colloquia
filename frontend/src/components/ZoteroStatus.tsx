@@ -52,7 +52,7 @@ function ZoteroStatus({
 
   if (state.loading) {
     return (
-      <div className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 dark:bg-blue-950 dark:text-blue-400">
+      <div className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 dark:bg-blue-950 dark:text-blue-400">
         <Spinner />
         Checking Zotero...
       </div>
@@ -64,13 +64,13 @@ function ZoteroStatus({
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setShowDropdown(!showDropdown)}
-          className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100 dark:bg-amber-950 dark:text-amber-400 dark:hover:bg-amber-900"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-amber-50 px-3 py-1 text-xs font-medium text-amber-700 transition-all hover:bg-amber-100 active:scale-[0.98] dark:bg-amber-950 dark:text-amber-400 dark:hover:bg-amber-900"
         >
           <span className="h-2 w-2 rounded-full bg-amber-500" />
           Zotero Not Detected
         </button>
         {showDropdown && (
-          <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border-primary bg-surface-primary p-4 text-sm shadow-lg">
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 origin-top-right animate-scale-in rounded-xl border border-border-primary bg-surface-primary p-4 text-sm shadow-elevated">
             <p className="mb-3 text-text-secondary">
               Make sure Zotero 7 is running with API access enabled.
             </p>
@@ -84,7 +84,7 @@ function ZoteroStatus({
                 onRefresh();
                 setShowDropdown(false);
               }}
-              className="w-full rounded-md bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-amber-700"
+              className="w-full rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-medium text-white transition-all hover:bg-amber-700 active:scale-[0.98]"
             >
               Retry Connection
             </button>
@@ -99,13 +99,13 @@ function ZoteroStatus({
       <div className="relative" ref={dropdownRef}>
         <button
           onClick={() => setShowDropdown(!showDropdown)}
-          className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 transition-colors hover:bg-blue-100 dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
+          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-50 px-3 py-1 text-xs font-medium text-blue-600 transition-all hover:bg-blue-100 active:scale-[0.98] dark:bg-blue-950 dark:text-blue-400 dark:hover:bg-blue-900"
         >
           <span className="h-2 w-2 rounded-full bg-blue-500" />
           Plugin Missing
         </button>
         {showDropdown && (
-          <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-lg border border-border-primary bg-surface-primary p-4 text-sm shadow-lg">
+          <div className="absolute right-0 top-full z-50 mt-2 w-72 origin-top-right animate-scale-in rounded-xl border border-border-primary bg-surface-primary p-4 text-sm shadow-elevated">
             <p className="mb-1 font-medium text-text-primary">
               Colloquia Plugin Not Installed
             </p>
@@ -131,7 +131,7 @@ function ZoteroStatus({
   }
 
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-full bg-green-100 px-3 py-1 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-400">
+    <div className="inline-flex items-center gap-1.5 rounded-lg bg-green-100 px-3 py-1 text-xs font-medium text-green-700 dark:bg-green-950 dark:text-green-400">
       <span className="h-2 w-2 rounded-full bg-green-500" />
       Zotero Connected
     </div>

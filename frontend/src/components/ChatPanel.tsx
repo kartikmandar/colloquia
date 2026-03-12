@@ -75,8 +75,22 @@ function ChatPanel({
         className="flex-1 overflow-y-auto px-4 py-3 space-y-2"
       >
         {messages.length === 0 && (
-          <div className="flex h-full items-center justify-center text-sm text-text-tertiary">
-            Start a conversation using voice or text
+          <div className="flex h-full flex-col items-center justify-center text-text-tertiary">
+            <svg
+              className="mb-3 h-12 w-12 animate-gentle-float text-accent-primary/40"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z"
+              />
+            </svg>
+            <p className="font-display text-base">Start a conversation</p>
+            <p className="mt-1 text-xs">Use voice or text to begin</p>
           </div>
         )}
         {messages.map((msg: ChatMessage, index: number) => {
@@ -84,20 +98,20 @@ function ChatPanel({
           return (
             <div
               key={msg.id}
-              className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} ${grouped ? "mt-0.5" : ""}`}
+              className={`flex animate-fade-in-up ${msg.role === "user" ? "justify-end" : "justify-start"} ${grouped ? "mt-0.5" : ""}`}
             >
               <div
-                className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
+                className={`max-w-[80%] px-3.5 py-2 text-sm ${
                   msg.role === "user"
-                    ? "bg-accent-primary text-white"
-                    : "bg-surface-tertiary text-text-primary"
+                    ? "rounded-2xl rounded-br-md bg-accent-primary text-white shadow-soft"
+                    : "rounded-2xl rounded-bl-md border-l-2 border-accent-primary/30 bg-surface-secondary text-text-primary shadow-soft"
                 }`}
               >
                 {!grouped && (
                   <div className="flex items-center gap-1.5 mb-0.5">
                     {msg.mode === "voice" ? (
                       <svg
-                        className={`h-3 w-3 ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
+                        className={`h-3 w-3 ${msg.role === "user" ? "text-white/60" : "text-text-tertiary"}`}
                         viewBox="0 0 20 20"
                         fill="currentColor"
                       >
@@ -109,7 +123,7 @@ function ChatPanel({
                       </svg>
                     ) : (
                       <svg
-                        className={`h-3 w-3 ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
+                        className={`h-3 w-3 ${msg.role === "user" ? "text-white/60" : "text-text-tertiary"}`}
                         viewBox="0 0 20 20"
                         fill="currentColor"
                       >
@@ -121,27 +135,27 @@ function ChatPanel({
                       </svg>
                     )}
                     <span
-                      className={`text-xs font-medium ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
+                      className={`font-display text-xs font-medium ${msg.role === "user" ? "text-white/60" : "text-text-tertiary"}`}
                     >
                       {msg.role === "user" ? "You" : "Colloquia"}
                     </span>
                     {msg.model && msg.role === "model" && (
-                      <span className="text-xs font-mono text-text-tertiary">
+                      <span className="rounded-md bg-surface-tertiary px-1.5 py-0.5 text-[10px] font-mono text-text-tertiary">
                         {msg.model}
                       </span>
                     )}
                     <span
-                      className={`ml-auto text-xs ${msg.role === "user" ? "text-blue-200" : "text-text-tertiary"}`}
+                      className={`ml-auto text-xs opacity-0 transition-opacity group-hover:opacity-100 ${msg.role === "user" ? "text-white/60" : "text-text-tertiary"}`}
                     >
                       {formatRelativeTime(msg.timestamp)}
                     </span>
                   </div>
                 )}
                 {msg.isStreaming && !msg.text ? (
-                  <span className="inline-flex items-center gap-1 text-text-tertiary">
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary [animation-delay:-0.3s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary [animation-delay:-0.15s]" />
-                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-text-tertiary" />
+                  <span className="inline-flex items-end gap-0.5 py-1 text-text-tertiary">
+                    <span className="h-3 w-0.5 rounded-full bg-accent-primary/60" style={{ animation: "waveBar 0.8s ease-in-out infinite", animationDelay: "0s" }} />
+                    <span className="h-3 w-0.5 rounded-full bg-accent-primary/60" style={{ animation: "waveBar 0.8s ease-in-out infinite", animationDelay: "0.15s" }} />
+                    <span className="h-3 w-0.5 rounded-full bg-accent-primary/60" style={{ animation: "waveBar 0.8s ease-in-out infinite", animationDelay: "0.3s" }} />
                   </span>
                 ) : msg.role === "model" ? (
                   <MarkdownRenderer content={msg.text} />
@@ -206,13 +220,13 @@ function ChatPanel({
                 isConnected ? "Type a message..." : "Connect to start chatting"
               }
               disabled={!isConnected}
-              className="flex-1 rounded-lg border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary outline-none transition-colors focus:border-accent-primary focus:ring-1 focus:ring-accent-primary disabled:bg-surface-tertiary disabled:text-text-tertiary"
+              className="flex-1 rounded-xl border border-border-primary bg-surface-primary px-3 py-2 text-sm text-text-primary outline-none transition-all focus:border-accent-primary focus:ring-1 focus:ring-accent-primary focus:shadow-soft disabled:bg-surface-tertiary disabled:text-text-tertiary"
             />
             {isTextGenerating ? (
               <button
                 type="button"
                 onClick={onStopGeneration}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-red-700"
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-red-700 active:scale-[0.98]"
               >
                 Stop
               </button>
@@ -220,7 +234,7 @@ function ChatPanel({
               <button
                 type="submit"
                 disabled={!isConnected || !inputText.trim()}
-                className="rounded-lg bg-accent-primary px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover disabled:bg-surface-tertiary disabled:text-text-tertiary disabled:cursor-not-allowed"
+                className="rounded-lg bg-gradient-to-r from-[#6d4aaa] to-[#a28ae5] px-4 py-2 text-sm font-medium text-white transition-all hover:shadow-soft active:scale-[0.98] disabled:bg-surface-tertiary disabled:from-surface-tertiary disabled:to-surface-tertiary disabled:text-text-tertiary disabled:cursor-not-allowed"
               >
                 Send
               </button>

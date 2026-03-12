@@ -47,12 +47,19 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-tertiary p-4">
-      <div className="w-full max-w-md rounded-xl bg-surface-primary p-8 shadow-overlay">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-surface-tertiary p-4">
+      {/* Atmospheric background orbs */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute -left-32 -top-32 h-96 w-96 rounded-full bg-accent-primary/10 blur-3xl" />
+        <div className="absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-accent-secondary/10 blur-3xl" />
+        <div className="absolute left-1/2 top-1/3 h-64 w-64 -translate-x-1/2 rounded-full bg-accent-primary/5 blur-2xl" />
+      </div>
+
+      <div className="relative w-full max-w-md animate-scale-in rounded-2xl bg-surface-primary p-8 shadow-elevated">
         {/* Header */}
         <div className="mb-8 text-center">
           <img src="/logo.svg" alt="Colloquia" className="mx-auto h-12" />
-          <p className="mt-2 text-sm text-text-secondary">
+          <p className="mt-3 font-display text-lg italic text-text-secondary">
             Voice-powered research assistant
           </p>
         </div>
@@ -76,7 +83,7 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
                   if (geminiError) setGeminiError("");
                 }}
                 placeholder="Enter your Gemini API key"
-                className={`w-full rounded-lg border px-4 py-2.5 pr-16 text-sm text-text-primary bg-surface-primary outline-none transition-colors focus:ring-2 ${
+                className={`w-full rounded-xl border px-4 py-2.5 pr-16 text-sm text-text-primary bg-surface-primary outline-none transition-all focus:ring-2 focus:shadow-soft ${
                   geminiError
                     ? "border-red-400 focus:border-red-500 focus:ring-red-200 dark:border-red-600 dark:focus:ring-red-900"
                     : "border-border-primary focus:border-accent-primary focus:ring-accent-primary/20"
@@ -96,7 +103,15 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
               </p>
             )}
             <p className="mt-1.5 text-xs text-text-tertiary">
-              Get a key from Google AI Studio
+              Get a key from{" "}
+              <a
+                href="https://aistudio.google.com/apikey"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-accent-primary underline transition-colors hover:text-accent-primary-hover"
+              >
+                Google AI Studio
+              </a>
             </p>
           </div>
 
@@ -120,7 +135,7 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
                   setS2KeyState(e.target.value)
                 }
                 placeholder="Optional — for higher rate limits"
-                className="w-full rounded-lg border border-border-primary bg-surface-primary px-4 py-2.5 pr-16 text-sm text-text-primary outline-none transition-colors focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20"
+                className="w-full rounded-xl border border-border-primary bg-surface-primary px-4 py-2.5 pr-16 text-sm text-text-primary outline-none transition-all focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20 focus:shadow-soft"
               />
               <button
                 type="button"
@@ -142,7 +157,7 @@ function SetupScreen({ onComplete }: SetupScreenProps): React.ReactElement {
           <button
             type="submit"
             disabled={isLoading}
-            className="flex w-full items-center justify-center rounded-lg bg-accent-primary px-6 py-3 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
+            className="flex w-full items-center justify-center rounded-xl bg-gradient-to-r from-[#6d4aaa] to-[#a28ae5] px-6 py-3 text-sm font-medium text-white shadow-soft transition-all hover:scale-[1.02] hover:shadow-elevated active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:scale-100"
           >
             {isLoading ? (
               <span className="flex items-center gap-2">

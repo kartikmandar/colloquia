@@ -39,7 +39,7 @@ function CapabilityBadges({ model }: { model: ModelInfo }): React.ReactElement {
         .map((p) => (
           <span
             key={p.label}
-            className={`inline-block rounded-full px-1.5 py-0 text-[10px] font-medium ${
+            className={`inline-block rounded-md px-1.5 py-0 text-[10px] font-medium ${
               colorClasses[p.color ?? "blue"]
             }`}
           >
@@ -47,12 +47,12 @@ function CapabilityBadges({ model }: { model: ModelInfo }): React.ReactElement {
           </span>
         ))}
       {!caps.supportsTools && caps.supportsText && (
-        <span className={`inline-block rounded-full px-1.5 py-0 text-[10px] font-medium ${colorClasses.amber}`}>
+        <span className={`inline-block rounded-md px-1.5 py-0 text-[10px] font-medium ${colorClasses.amber}`}>
           No Tools
         </span>
       )}
       {model.unstable && (
-        <span className={`inline-block rounded-full px-1.5 py-0 text-[10px] font-medium ${colorClasses.red}`}>
+        <span className={`inline-block rounded-md px-1.5 py-0 text-[10px] font-medium ${colorClasses.red}`}>
           Unstable
         </span>
       )}
@@ -72,14 +72,14 @@ function ModelSection({ title, models, currentModelId, onSelect }: ModelSectionP
 
   return (
     <>
-      <div className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-text-tertiary mt-1 first:mt-0">
+      <div className="px-2 py-1 font-display text-[10px] font-semibold uppercase tracking-wider text-text-tertiary mt-1 first:mt-0">
         {title}
       </div>
       {models.map((model) => (
         <button
           key={model.modelId}
           onClick={() => onSelect(model.modelId)}
-          className={`w-full rounded-md px-2 py-1.5 text-left transition-colors hover:bg-surface-tertiary ${
+          className={`w-full rounded-lg px-2 py-1.5 text-left transition-all hover:bg-surface-tertiary active:scale-[0.98] ${
             model.modelId === currentModelId ? "bg-surface-tertiary" : ""
           }`}
         >
@@ -177,7 +177,7 @@ function ModelSelector({
       <button
         onClick={() => setIsOpen(!isOpen)}
         disabled={!isConnected || isSwitching}
-        className="flex items-center gap-1.5 rounded-lg border border-border-primary px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-colors hover:bg-surface-tertiary disabled:opacity-50 disabled:cursor-not-allowed"
+        className="flex items-center gap-1.5 rounded-lg border border-border-primary px-2.5 py-1.5 text-xs font-medium text-text-secondary transition-all hover:bg-surface-tertiary hover:shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
         title={`Current ${currentMode} model: ${currentModelId}`}
       >
         {isSwitching ? (
@@ -216,7 +216,7 @@ function ModelSelector({
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full z-50 mt-1 w-72 max-h-96 overflow-y-auto rounded-lg border border-border-primary bg-surface-primary shadow-lg">
+        <div className="absolute right-0 top-full z-50 mt-1 w-72 max-h-96 origin-top-right animate-scale-in overflow-y-auto rounded-xl border border-border-primary bg-surface-primary shadow-elevated">
           <div className="p-1.5">
             {currentMode === "voice" ? (
               <ModelSection

@@ -23,11 +23,11 @@ function ThinkingStep({
       : "";
 
   return (
-    <div className="mt-1">
+    <div className="mt-1 animate-fade-in-up">
       <button
         type="button"
         onClick={(): void => setExpanded(!expanded)}
-        className="flex items-center gap-1.5 rounded-lg bg-purple-50 px-2 py-1 text-xs text-purple-600 transition-colors hover:bg-purple-100 dark:bg-purple-950 dark:text-purple-400 dark:hover:bg-purple-900"
+        className="flex items-center gap-1.5 rounded-lg bg-purple-50 px-2 py-1 text-xs text-purple-600 transition-all hover:bg-purple-100 hover:shadow-sm active:scale-[0.98] dark:bg-purple-950 dark:text-purple-400 dark:hover:bg-purple-900"
       >
         <span>{"[thought]"}</span>
         <span className="font-medium">Thinking...</span>
@@ -50,7 +50,7 @@ function ThinkingStep({
       </button>
 
       {expanded && (
-        <div className="mt-1 max-h-64 overflow-y-auto rounded-lg border border-purple-200 bg-purple-50 p-2 dark:border-purple-800 dark:bg-purple-950">
+        <div className="mt-1 max-h-64 animate-fade-in-up overflow-y-auto rounded-lg border border-purple-200 bg-purple-50 p-2 dark:border-purple-800 dark:bg-purple-950">
           <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-xs text-purple-800 dark:text-purple-300">
             {content}
           </pre>

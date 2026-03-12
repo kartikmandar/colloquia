@@ -55,7 +55,7 @@ function EmptyState({ message }: { message: string }): React.ReactElement {
     <div className="flex flex-col items-center justify-center py-16 text-text-tertiary">
       <svg
         xmlns="http://www.w3.org/2000/svg"
-        className="mb-3 h-12 w-12"
+        className="mb-3 h-12 w-12 animate-gentle-float text-accent-primary/40"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -98,13 +98,13 @@ function CollectionSidebar({
   return (
     <aside className="flex h-full flex-col border-r border-border-primary bg-surface-secondary">
       <h2 className="flex items-center justify-between border-b border-border-primary px-4 py-3">
-        <span className="text-xs font-semibold uppercase tracking-wider text-text-secondary">
+        <span className="font-display text-xs font-semibold uppercase tracking-wider text-text-secondary">
           Collections
         </span>
         <button
           onClick={onRefresh}
           disabled={refreshing}
-          className="rounded p-1 text-text-tertiary transition-colors hover:bg-surface-tertiary hover:text-text-secondary disabled:opacity-50"
+          className="rounded p-1 text-text-tertiary transition-all hover:bg-surface-tertiary hover:text-text-secondary active:scale-[0.98] disabled:opacity-50"
           aria-label="Refresh collections"
           title="Refresh collections"
         >
@@ -134,7 +134,7 @@ function CollectionSidebar({
             onClick={() => onSelect(null)}
             className={`w-full px-4 py-2 text-left text-sm transition-colors ${
               activeKey === null
-                ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-400"
+                ? "bg-accent-primary/10 border-r-2 border-accent-primary font-medium text-accent-primary"
                 : "text-text-primary hover:bg-surface-tertiary"
             }`}
           >
@@ -146,7 +146,7 @@ function CollectionSidebar({
               onClick={() => onSelect(col.key)}
               className={`w-full px-4 py-2 text-left text-sm transition-colors ${
                 activeKey === col.key
-                  ? "bg-blue-50 font-medium text-blue-700 dark:bg-blue-950 dark:text-blue-400"
+                  ? "bg-accent-primary/10 border-r-2 border-accent-primary font-medium text-accent-primary"
                   : "text-text-primary hover:bg-surface-tertiary"
               }`}
             >
@@ -197,7 +197,7 @@ function SearchBar({
           onChange(e.target.value)
         }
         placeholder="Search papers..."
-        className="w-full rounded-lg border border-border-primary bg-surface-primary py-2 pl-10 pr-9 text-sm text-text-primary placeholder-text-tertiary outline-none transition-colors focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20"
+        className="w-full rounded-xl border border-border-primary bg-surface-primary py-2 pl-10 pr-9 text-sm text-text-primary placeholder-text-tertiary outline-none transition-all focus:border-accent-primary focus:ring-2 focus:ring-accent-primary/20 focus:shadow-soft"
       />
       {value.length > 0 && (
         <button
@@ -249,12 +249,12 @@ function PaperRow({
       onClick={onSelect}
       className={`w-full border-b border-border-secondary px-4 py-3 text-left transition-colors ${
         isSelected
-          ? "bg-blue-50 border-l-2 border-l-blue-600 dark:bg-blue-950 dark:border-l-blue-400"
+          ? "bg-accent-primary/8 border-l-3 border-l-accent-primary"
           : "hover:bg-surface-secondary"
       }`}
     >
       <p
-        className={`text-sm leading-snug ${isSelected ? "font-semibold text-blue-900 dark:text-blue-300" : "font-medium text-text-primary"}`}
+        className={`font-display text-sm leading-snug ${isSelected ? "font-semibold text-accent-primary" : "font-medium text-text-primary"}`}
       >
         {item.data.title || "Untitled"}
       </p>
@@ -294,7 +294,7 @@ function PaperDetail({
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="p-6">
         {/* Title */}
-        <h2 className="text-xl font-bold leading-tight text-text-primary">
+        <h2 className="font-display text-2xl font-bold leading-tight text-text-primary">
           {data.title || "Untitled"}
         </h2>
 
@@ -323,13 +323,18 @@ function PaperDetail({
           </p>
         )}
 
+        {/* Divider */}
+        {data.tags.length > 0 && (
+          <hr className="my-4 border-border-secondary" />
+        )}
+
         {/* Tags */}
         {data.tags.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
+          <div className="flex flex-wrap gap-1.5">
             {data.tags.map((t: { tag: string }, i: number) => (
               <span
                 key={i}
-                className="inline-block rounded-full bg-surface-tertiary px-2.5 py-0.5 text-xs font-medium text-text-secondary"
+                className="inline-block rounded-md bg-accent-secondary/10 px-2.5 py-0.5 text-xs font-medium text-accent-secondary"
               >
                 {t.tag}
               </span>
@@ -340,7 +345,8 @@ function PaperDetail({
         {/* Abstract */}
         {data.abstractNote && (
           <div className="mt-4">
-            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-text-secondary">
+            <hr className="mb-4 border-border-secondary" />
+            <h3 className="mb-1 font-display text-xs font-semibold uppercase tracking-wider text-text-secondary">
               Abstract
             </h3>
             <p className="text-sm leading-relaxed text-text-primary">
@@ -352,8 +358,15 @@ function PaperDetail({
         {/* Open Discussion button */}
         <button
           onClick={onOpenDiscussion}
-          className="mt-6 w-full rounded-lg bg-accent-primary px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-primary-hover focus:outline-none focus:ring-2 focus:ring-accent-primary focus:ring-offset-2"
+          className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#6d4aaa] to-[#a28ae5] px-4 py-2.5 text-sm font-medium text-white shadow-soft transition-all hover:scale-[1.02] hover:shadow-elevated active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-accent-primary focus:ring-offset-2"
         >
+          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+            <path
+              fillRule="evenodd"
+              d="M18 10c0 3.866-3.582 7-8 7a8.841 8.841 0 01-4.083-.98L2 17l1.338-3.123C2.493 12.767 2 11.434 2 10c0-3.866 3.582-7 8-7s8 3.134 8 7zM7 9H5v2h2V9zm8 0h-2v2h2V9zm-4 0H9v2h2V9z"
+              clipRule="evenodd"
+            />
+          </svg>
           Add to chat context
         </button>
       </div>
