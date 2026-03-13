@@ -83,6 +83,7 @@ def resolve_zotero_result(msg: dict[str, Any], ctx: ZoteroToolContext) -> None:
 def create_zotero_tools(
     ws: WebSocket,
     ctx: ZoteroToolContext,
+    embedding_service: Any | None = None,
 ) -> list[Any]:
     """Create Zotero tool functions bound to a specific WebSocket session.
 
@@ -368,7 +369,7 @@ def create_zotero_tools(
             "totalPages": result.get("totalPages"),
         }
 
-    return [
+    tools: list[Any] = [
         search_zotero_library,
         get_item_details,
         get_paper_fulltext,
@@ -380,3 +381,10 @@ def create_zotero_tools(
         trash_items,
         add_paper_to_zotero,
     ]
+
+    # Add index tool if embedding service is available
+    if embedding_service is not None:
+        from tools.vector_search import create_index_tool
+        tools.append(create_index_tool(embedding_service, ws, ctx))
+
+    return tools

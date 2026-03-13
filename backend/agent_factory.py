@@ -18,7 +18,8 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService, Session
 
 from agents.colloquia_agent import create_colloquia_agent
-from config import APP_NAME, LIVE_MODEL, TEXT_MODEL
+from config import APP_NAME, CHROMADB_PERSIST_DIR, LIVE_MODEL, TEXT_MODEL
+from tools.embedding_service import EmbeddingService
 from tools.zotero_tools import ZoteroToolContext
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -42,6 +43,11 @@ class SessionBundle:
     current_text_model: str = ""
     api_key: str = ""
     ws: WebSocket | None = None
+    # Embeddings
+    embedding_service: EmbeddingService | None = None
+    # Chat persistence
+    chat_id: str = ""
+    chat_type: str = "voice"
 
     async def rebuild_voice_agent(self, new_model_id: str) -> None:
         """Recreate agent and runner with a new voice model."""
@@ -53,7 +59,10 @@ class SessionBundle:
             _ = model.api_client
             _ = model._live_api_client
 
-        agent = create_colloquia_agent(self.ws, self.zotero_ctx, model=model)
+        agent = create_colloquia_agent(
+            self.ws, self.zotero_ctx, model=model,
+            embedding_service=self.embedding_service,
+        )
         self.runner = Runner(
             agent=agent,
             app_name=APP_NAME,
@@ -85,6 +94,16 @@ async def create_session_bundle(
 
     zotero_ctx: ZoteroToolContext = ZoteroToolContext()
 
+    # Initialize embedding service
+    embedding_service: EmbeddingService | None = None
+    try:
+        embedding_service = EmbeddingService(
+            api_key=api_key, persist_dir=CHROMADB_PERSIST_DIR
+        )
+        logger.info("EmbeddingService created for session")
+    except Exception as emb_err:
+        logger.warning("EmbeddingService init failed (non-fatal): %s", str(emb_err))
+
     # BYOK: Set API key in env, create Gemini instances (each caches its Client),
     # then create agent with the pre-initialized models.
     async with _api_key_lock:
@@ -94,7 +113,10 @@ async def create_session_bundle(
         _ = model.api_client
         _ = model._live_api_client
 
-    agent = create_colloquia_agent(ws, zotero_ctx, model=model)
+    agent = create_colloquia_agent(
+        ws, zotero_ctx, model=model,
+        embedding_service=embedding_service,
+    )
 
     session_service: InMemorySessionService = InMemorySessionService()
 
@@ -128,4 +150,5 @@ async def create_session_bundle(
         current_text_model=TEXT_MODEL,
         api_key=api_key,
         ws=ws,
+        embedding_service=embedding_service,
     )

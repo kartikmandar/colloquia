@@ -15,7 +15,9 @@ from google.genai import types
 from config import LIVE_MODEL, AGENT_NAME
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
+from tools.embedding_service import EmbeddingService
 from tools.local_tools import search_academic_papers, get_paper_recommendations
+from tools.vector_search import create_semantic_search_tool
 from tools.zotero_tools import ZoteroToolContext, create_zotero_tools
 
 
@@ -45,6 +47,7 @@ def create_colloquia_agent(
     ws: WebSocket,
     zotero_ctx: ZoteroToolContext,
     model: Gemini | None = None,
+    embedding_service: EmbeddingService | None = None,
 ) -> LlmAgent:
     """Create the main Colloquia agent with all tools.
 
@@ -52,16 +55,22 @@ def create_colloquia_agent(
         ws: The WebSocket for this session (Zotero tools close over it).
         zotero_ctx: Per-session Zotero tool context.
         model: Pre-configured Gemini model instance (for BYOK).
+        embedding_service: Optional embedding service for semantic search.
 
     Returns:
         Configured LlmAgent.
     """
-    zotero_tools: list[Any] = create_zotero_tools(ws, zotero_ctx)
+    zotero_tools: list[Any] = create_zotero_tools(
+        ws, zotero_ctx, embedding_service=embedding_service
+    )
 
     local_tools: list[Any] = [
         search_academic_papers,
         get_paper_recommendations,
     ]
+
+    if embedding_service is not None:
+        local_tools.append(create_semantic_search_tool(embedding_service))
 
     all_tools: list[Any] = local_tools + zotero_tools
 

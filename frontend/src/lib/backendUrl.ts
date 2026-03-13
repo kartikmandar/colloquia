@@ -50,4 +50,15 @@ export function getFallbackUrl(currentUrl: string): string {
   return LOCAL_URL;
 }
 
+/**
+ * Convert a WebSocket URL to its HTTP counterpart.
+ * e.g. ws://localhost:8000/ws → http://localhost:8000
+ */
+export function wsToHttpUrl(wsUrl: string): string {
+  return wsUrl
+    .replace(/^wss:/, "https:")
+    .replace(/^ws:/, "http:")
+    .replace(/\/ws$/, "");
+}
+
 export { CLOUD_RUN_URL, LOCAL_URL };

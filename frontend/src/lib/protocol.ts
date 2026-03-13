@@ -98,6 +98,36 @@ export interface ChatModeSwitchMessage {
   mode: "voice" | "text";
 }
 
+/** Request to create a new persistent chat */
+export interface NewChatMessage {
+  type: "new_chat";
+  chatType: "voice" | "text";
+}
+
+/** Request to load a persistent chat */
+export interface LoadChatMessage {
+  type: "load_chat";
+  chatId: string;
+}
+
+/** Request to list all chats */
+export interface ListChatsMessage {
+  type: "list_chats";
+}
+
+/** Request to rename a chat */
+export interface RenameChatMessage {
+  type: "rename_chat";
+  chatId: string;
+  title: string;
+}
+
+/** Request to delete a chat */
+export interface DeleteChatMessage {
+  type: "delete_chat";
+  chatId: string;
+}
+
 export type ClientMessage =
   | ConfigMessage
   | AudioMessage
@@ -106,7 +136,12 @@ export type ClientMessage =
   | ZoteroActionResultMessage
   | ControlMessage
   | ModelSwitchMessage
-  | ChatModeSwitchMessage;
+  | ChatModeSwitchMessage
+  | NewChatMessage
+  | LoadChatMessage
+  | ListChatsMessage
+  | RenameChatMessage
+  | DeleteChatMessage;
 
 // ------------------------------------------------------------
 // Server messages (backend -> frontend)
@@ -275,6 +310,67 @@ export interface MediaGeneratingMessage {
   mediaType: "image" | "video";
 }
 
+// ------------------------------------------------------------
+// Chat persistence messages (server -> frontend)
+// ------------------------------------------------------------
+
+export interface ChatSummary {
+  id: string;
+  title: string;
+  chat_type: "voice" | "text";
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface SavedChatMessage {
+  id: number;
+  role: "user" | "model" | "system";
+  content: string;
+  session_mode: string;
+  timestamp: string;
+  model_used?: string;
+  tool_calls?: Record<string, unknown>[];
+  thinking?: string;
+}
+
+export interface ChatCreatedMessage {
+  type: "chat_created";
+  chatId: string;
+  chatType: "voice" | "text";
+}
+
+export interface ChatLoadedMessage {
+  type: "chat_loaded";
+  chatId: string;
+  chat: ChatSummary;
+  messages: SavedChatMessage[];
+}
+
+export interface ChatListMessage {
+  type: "chat_list";
+  chats: ChatSummary[];
+}
+
+export interface ChatTitleUpdatedMessage {
+  type: "chat_title_updated";
+  chatId: string;
+  title: string;
+}
+
+export interface ChatRenamedMessage {
+  type: "chat_renamed";
+  chatId: string;
+  title: string;
+  success: boolean;
+}
+
+export interface ChatDeletedMessage {
+  type: "chat_deleted";
+  chatId: string;
+  success: boolean;
+}
+
 export type ServerMessage =
   | ServerAudioMessage
   | TranscriptMessage
@@ -293,4 +389,10 @@ export type ServerMessage =
   | ModelSwitchAckMessage
   | ImageResponseMessage
   | VideoResponseMessage
-  | MediaGeneratingMessage;
+  | MediaGeneratingMessage
+  | ChatCreatedMessage
+  | ChatLoadedMessage
+  | ChatListMessage
+  | ChatTitleUpdatedMessage
+  | ChatRenamedMessage
+  | ChatDeletedMessage;

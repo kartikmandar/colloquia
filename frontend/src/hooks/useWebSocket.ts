@@ -24,6 +24,12 @@ import type {
   ImageResponseMessage,
   VideoResponseMessage,
   MediaGeneratingMessage,
+  ChatCreatedMessage,
+  ChatLoadedMessage,
+  ChatListMessage,
+  ChatTitleUpdatedMessage,
+  ChatSummary,
+  SavedChatMessage,
 } from "../lib/protocol";
 import type { MediaPart } from "../components/MediaRenderer";
 
@@ -51,6 +57,14 @@ interface UseWebSocketOptions {
   onAudioData?: (base64Pcm: string) => void;
   onInterrupted?: () => void;
   autoConnect?: boolean;
+  onChatCreated?: (chatId: string, chatType: "voice" | "text") => void;
+  onChatLoaded?: (
+    chatId: string,
+    chat: ChatSummary,
+    messages: SavedChatMessage[],
+  ) => void;
+  onChatList?: (chats: ChatSummary[]) => void;
+  onChatTitleUpdated?: (chatId: string, title: string) => void;
 }
 
 interface UseWebSocketReturn {
@@ -70,6 +84,13 @@ interface UseWebSocketReturn {
   sendControl: (action: string, mode?: string) => void;
   sendModelSwitch: (modelId: string, mode: "voice" | "text") => void;
   sendChatModeSwitch: (mode: "voice" | "text") => void;
+  sendNewChat: (chatType: "voice" | "text") => void;
+  sendLoadChat: (chatId: string) => void;
+  sendListChats: () => void;
+  sendRenameChat: (chatId: string, title: string) => void;
+  sendDeleteChat: (chatId: string) => void;
+  loadChatMessages: (savedMessages: SavedChatMessage[]) => void;
+  clearMessages: () => void;
 }
 
 let messageIdCounter: number = 0;
@@ -82,6 +103,10 @@ export function useWebSocket({
   onAudioData,
   onInterrupted,
   autoConnect = false,
+  onChatCreated,
+  onChatLoaded,
+  onChatList,
+  onChatTitleUpdated,
 }: UseWebSocketOptions): UseWebSocketReturn {
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -510,9 +535,52 @@ export function useWebSocket({
           appendMediaToLastModel(placeholder);
           break;
         }
+
+        case "chat_created": {
+          const cc = data as ChatCreatedMessage;
+          onChatCreated?.(cc.chatId, cc.chatType);
+          break;
+        }
+
+        case "chat_loaded": {
+          const cl = data as ChatLoadedMessage;
+          onChatLoaded?.(cl.chatId, cl.chat, cl.messages);
+          break;
+        }
+
+        case "chat_list": {
+          const clist = data as ChatListMessage;
+          onChatList?.(clist.chats);
+          break;
+        }
+
+        case "chat_title_updated": {
+          const ctu = data as ChatTitleUpdatedMessage;
+          onChatTitleUpdated?.(ctu.chatId, ctu.title);
+          // Trigger ChatHistory refresh if mounted
+          const refreshFn = (
+            window as unknown as Record<string, (() => Promise<void>) | undefined>
+          ).__chatHistoryRefresh;
+          if (refreshFn) refreshFn();
+          break;
+        }
+
+        case "chat_renamed":
+        case "chat_deleted":
+          // These are ack messages; ChatHistory handles via REST
+          break;
       }
     },
-    [onAudioData, onInterrupted, addMessage, handleZoteroAction],
+    [
+      onAudioData,
+      onInterrupted,
+      addMessage,
+      handleZoteroAction,
+      onChatCreated,
+      onChatLoaded,
+      onChatList,
+      onChatTitleUpdated,
+    ],
   );
 
   const connectToUrl = useCallback(
@@ -681,6 +749,59 @@ export function useWebSocket({
     [sendRaw],
   );
 
+  const sendNewChat = useCallback(
+    (chatType: "voice" | "text"): void => {
+      sendRaw({ type: "new_chat", chatType });
+    },
+    [sendRaw],
+  );
+
+  const sendLoadChat = useCallback(
+    (chatId: string): void => {
+      sendRaw({ type: "load_chat", chatId });
+    },
+    [sendRaw],
+  );
+
+  const sendListChats = useCallback((): void => {
+    sendRaw({ type: "list_chats" });
+  }, [sendRaw]);
+
+  const sendRenameChat = useCallback(
+    (chatId: string, title: string): void => {
+      sendRaw({ type: "rename_chat", chatId, title });
+    },
+    [sendRaw],
+  );
+
+  const sendDeleteChat = useCallback(
+    (chatId: string): void => {
+      sendRaw({ type: "delete_chat", chatId });
+    },
+    [sendRaw],
+  );
+
+  const loadChatMessages = useCallback(
+    (savedMessages: SavedChatMessage[]): void => {
+      const converted: ChatMessage[] = savedMessages
+        .filter((m: SavedChatMessage) => m.content)
+        .map((m: SavedChatMessage) => ({
+          id: `saved-${m.id}`,
+          role: m.role === "system" ? ("model" as const) : (m.role as "user" | "model"),
+          text: m.content,
+          mode: "text" as const,
+          timestamp: new Date(m.timestamp).getTime(),
+          model: m.model_used ?? undefined,
+        }));
+      setMessages(converted);
+    },
+    [],
+  );
+
+  const clearMessages = useCallback((): void => {
+    setMessages([]);
+  }, []);
+
   const sendModelSwitch = useCallback(
     (modelId: string, mode: "voice" | "text"): void => {
       setIsModelSwitching(true);
@@ -755,5 +876,12 @@ export function useWebSocket({
     sendControl,
     sendModelSwitch,
     sendChatModeSwitch,
+    sendNewChat,
+    sendLoadChat,
+    sendListChats,
+    sendRenameChat,
+    sendDeleteChat,
+    loadChatMessages,
+    clearMessages,
   };
 }

@@ -5,12 +5,14 @@ import { useZoteroHealth } from "../hooks/useZoteroHealth";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { useAudioCapture } from "../hooks/useAudioCapture";
 import { AudioStreamer } from "../lib/audio-streamer";
-import { resolveBackendUrl } from "../lib/backendUrl";
+import { resolveBackendUrl, wsToHttpUrl } from "../lib/backendUrl";
 import { loadPaper } from "../lib/paperLoader";
 import type { LoadPaperResult } from "../lib/paperLoader";
+import type { ChatSummary, SavedChatMessage } from "../lib/protocol";
 import { Toaster } from "react-hot-toast";
 import ZoteroStatus from "../components/ZoteroStatus";
 import PaperBrowser from "../components/PaperBrowser";
+import ChatHistory from "../components/ChatHistory";
 import ConnectionBadge from "../components/ConnectionBadge";
 import ChatPanel from "../components/ChatPanel";
 import MicButton from "../components/MicButton";
@@ -48,6 +50,10 @@ function MainApp({
   const [paperLoading, setPaperLoading] = useState<boolean>(false);
   const [chatMode, setChatMode] = useState<"voice" | "text">("voice");
   const [sessionEnded, setSessionEnded] = useState<boolean>(false);
+  const [leftPanelTab, setLeftPanelTab] = useState<"papers" | "chats">(
+    "papers",
+  );
+  const [activeChatId, setActiveChatId] = useState<string | null>(null);
 
   // Audio playback context (24kHz for Gemini output)
   const audioStreamerRef = useRef<AudioStreamer | null>(null);
@@ -77,6 +83,37 @@ function MainApp({
     [getAudioStreamer],
   );
 
+  // Ref to hold loadChatMessages from hook (breaks circular dep)
+  const loadChatMessagesRef = useRef<
+    ((msgs: SavedChatMessage[]) => void) | null
+  >(null);
+
+  const handleChatCreated = useCallback(
+    (chatId: string, _chatType: "voice" | "text"): void => {
+      setActiveChatId(chatId);
+    },
+    [],
+  );
+
+  const handleChatLoaded = useCallback(
+    (
+      chatId: string,
+      _chat: ChatSummary,
+      savedMessages: SavedChatMessage[],
+    ): void => {
+      setActiveChatId(chatId);
+      loadChatMessagesRef.current?.(savedMessages);
+    },
+    [],
+  );
+
+  const handleChatTitleUpdated = useCallback(
+    (_chatId: string, _title: string): void => {
+      // ChatHistory component refreshes itself via window.__chatHistoryRefresh
+    },
+    [],
+  );
+
   // WebSocket connection
   const {
     status,
@@ -95,12 +132,22 @@ function MainApp({
     isTextGenerating,
     sendModelSwitch,
     sendChatModeSwitch,
+    sendNewChat,
+    sendLoadChat,
+    loadChatMessages,
+    clearMessages,
   } = useWebSocket({
     url: wsUrl,
     onAudioData: handleAudioFromServer,
     onInterrupted: handleInterrupted,
     autoConnect: true,
+    onChatCreated: handleChatCreated,
+    onChatTitleUpdated: handleChatTitleUpdated,
+    onChatLoaded: handleChatLoaded,
   });
+
+  // Keep ref in sync with hook's loadChatMessages
+  loadChatMessagesRef.current = loadChatMessages;
 
   const isConnected: boolean = status === "connected";
 
@@ -155,6 +202,50 @@ function MainApp({
     setLoadedPaperTitle(null);
     sendControl("switch_mode", "lobby");
   }, [sendControl]);
+
+  const handleSelectChat = useCallback(
+    (chatId: string, chatType: "voice" | "text"): void => {
+      setActiveChatId(chatId);
+      if (chatType !== chatMode) {
+        setChatMode(chatType);
+        sendChatModeSwitch(chatType);
+      }
+      sendLoadChat(chatId);
+    },
+    [chatMode, sendChatModeSwitch, sendLoadChat],
+  );
+
+  const handleNewChat = useCallback(
+    (chatType: "voice" | "text"): void => {
+      clearMessages();
+      setActiveChatId(null);
+      if (chatType !== chatMode) {
+        setChatMode(chatType);
+        sendChatModeSwitch(chatType);
+      }
+      sendNewChat(chatType);
+    },
+    [chatMode, clearMessages, sendChatModeSwitch, sendNewChat],
+  );
+
+  const handleChatDeleted = useCallback(
+    (chatId: string): void => {
+      if (activeChatId === chatId) {
+        setActiveChatId(null);
+        clearMessages();
+      }
+    },
+    [activeChatId, clearMessages],
+  );
+
+  const handleChatRenamed = useCallback(
+    (_chatId: string, _title: string): void => {
+      // No-op; ChatHistory manages its own state
+    },
+    [],
+  );
+
+  const httpUrl: string = wsToHttpUrl(activeUrl);
 
   const handleMicToggle = useCallback(async (): Promise<void> => {
     if (isCapturing) {
@@ -294,11 +385,51 @@ function MainApp({
       <main className="relative flex-1 overflow-hidden">
         <Group orientation="horizontal">
           <Panel defaultSize="65%" minSize="30%">
-            <div className="h-full overflow-hidden p-4">
-              <PaperBrowser
-                onPaperSelect={handlePaperSelect}
-                onOpenDiscussion={handleOpenDiscussion}
-              />
+            <div className="flex h-full flex-col overflow-hidden">
+              {/* Tab bar */}
+              <div className="flex border-b border-border-primary bg-surface-primary">
+                <button
+                  onClick={(): void => setLeftPanelTab("papers")}
+                  className={`flex-1 px-4 py-2 text-xs font-medium transition-all ${
+                    leftPanelTab === "papers"
+                      ? "border-b-2 border-accent-primary text-accent-primary"
+                      : "text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  Papers
+                </button>
+                <button
+                  onClick={(): void => setLeftPanelTab("chats")}
+                  className={`flex-1 px-4 py-2 text-xs font-medium transition-all ${
+                    leftPanelTab === "chats"
+                      ? "border-b-2 border-accent-primary text-accent-primary"
+                      : "text-text-secondary hover:text-text-primary"
+                  }`}
+                >
+                  Chats
+                </button>
+              </div>
+              {/* Tab content */}
+              <div className="flex-1 overflow-hidden">
+                {leftPanelTab === "papers" ? (
+                  <div className="h-full p-4">
+                    <PaperBrowser
+                      onPaperSelect={handlePaperSelect}
+                      onOpenDiscussion={handleOpenDiscussion}
+                    />
+                  </div>
+                ) : (
+                  <ChatHistory
+                    backendUrl={httpUrl}
+                    apiKey={geminiKey ?? ""}
+                    activeChatId={activeChatId}
+                    onSelectChat={handleSelectChat}
+                    onNewChat={handleNewChat}
+                    onChatDeleted={handleChatDeleted}
+                    onChatRenamed={handleChatRenamed}
+                  />
+                )}
+              </div>
             </div>
           </Panel>
           <ResizeHandle />

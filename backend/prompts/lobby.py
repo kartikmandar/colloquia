@@ -41,6 +41,8 @@ in the chat.
 - search_academic_papers — search OpenAlex
 - add_paper_to_zotero — add a paper (confirm first)
 - get_paper_recommendations — find similar papers
+- semantic_search_library — search by meaning using vector embeddings (requires indexing)
+- index_library_papers — index papers for semantic search
 - manage_tags, manage_collection — organize the library
 - Google Search — web lookup for any research question
 

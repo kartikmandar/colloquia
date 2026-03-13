@@ -8,6 +8,7 @@ import asyncio
 import base64
 import json
 import logging
+import uuid
 from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
@@ -16,15 +17,34 @@ from google.adk.runners import RunConfig
 from google.genai import types
 
 from agent_factory import SessionBundle, create_session_bundle
-from config import MAX_HISTORY_TURNS, MAX_RECONNECTS, TEXT_MODEL, TEXT_MODEL_FALLBACK
+from chat_store import ChatStore
+from config import (
+    MAX_HISTORY_TURNS,
+    MAX_RECONNECTS,
+    RAG_TOP_K,
+    TEXT_MODEL,
+    TEXT_MODEL_FALLBACK,
+    TITLE_GEN_MODEL,
+    TITLE_GEN_THRESHOLD,
+)
 from model_registry import MODEL_REGISTRY, get_registry_json, ModelEntry
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
 from tools.local_tools import search_academic_papers, get_paper_recommendations
+from tools.vector_search import create_semantic_search_tool
 from tools.web_search import create_web_search_tool
 from tools.zotero_tools import create_zotero_tools, resolve_zotero_result
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+# Module-level chat store reference, set by main.py at startup
+_chat_store: ChatStore | None = None
+
+
+def set_chat_store(store: ChatStore) -> None:
+    """Set the module-level chat store reference."""
+    global _chat_store
+    _chat_store = store
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +66,23 @@ async def run_session(
     runner = bundle.runner
     session = bundle.session
     zotero_ctx = bundle.zotero_ctx
+
+    # Auto-create a persistent chat for this session
+    if _chat_store:
+        try:
+            chat_id: str = str(uuid.uuid4())
+            key_hash: str = ChatStore.hash_api_key(api_key)
+            await _chat_store.create_chat(chat_id, "voice", key_hash)
+            bundle.chat_id = chat_id
+            bundle.chat_type = "voice"
+            logger.info("Auto-created chat %s for session", chat_id)
+            await ws.send_json({
+                "type": "chat_created",
+                "chatId": chat_id,
+                "chatType": "voice",
+            })
+        except Exception as chat_err:
+            logger.warning("Failed to auto-create chat: %s", str(chat_err))
 
     # Send available models to frontend
     await ws.send_json({"type": "model_list", **get_registry_json()})
@@ -206,6 +243,21 @@ async def run_session(
                                 # will reconnect with a fresh session.
                                 live_queue.close()
 
+                        elif msg_type == "new_chat":
+                            await _handle_new_chat(ws, bundle, raw, api_key)
+
+                        elif msg_type == "load_chat":
+                            await _handle_load_chat(ws, bundle, raw)
+
+                        elif msg_type == "list_chats":
+                            await _handle_list_chats(ws, api_key)
+
+                        elif msg_type == "rename_chat":
+                            await _handle_rename_chat(ws, raw)
+
+                        elif msg_type == "delete_chat":
+                            await _handle_delete_chat(ws, raw)
+
                         elif msg_type == "model_switch":
                             requested_model: str = raw.get("modelId", "")
                             switch_mode: str = raw.get("mode", "")
@@ -285,6 +337,18 @@ async def run_session(
                             "text": event.output_transcription.text,
                             "isFinal": True,
                         })
+                        # Persist voice transcript
+                        if _chat_store and bundle.chat_id:
+                            try:
+                                session_mode: str = bundle.session.state.get("session_mode", "lobby")
+                                await _chat_store.add_message(
+                                    bundle.chat_id, "model",
+                                    event.output_transcription.text,
+                                    session_mode=session_mode,
+                                    model_used=bundle.current_voice_model,
+                                )
+                            except Exception as persist_err:
+                                logger.warning("Failed to persist model transcript: %s", str(persist_err))
 
                     if event.input_transcription:
                         await ws.send_json({
@@ -293,6 +357,17 @@ async def run_session(
                             "text": event.input_transcription.text,
                             "isFinal": True,
                         })
+                        # Persist voice transcript
+                        if _chat_store and bundle.chat_id:
+                            try:
+                                session_mode_u: str = bundle.session.state.get("session_mode", "lobby")
+                                await _chat_store.add_message(
+                                    bundle.chat_id, "user",
+                                    event.input_transcription.text,
+                                    session_mode=session_mode_u,
+                                )
+                            except Exception as persist_err:
+                                logger.warning("Failed to persist user transcript: %s", str(persist_err))
 
                     # Interruption (barge-in)
                     if event.interrupted:
@@ -446,6 +521,218 @@ async def run_session(
         else:
             break
 
+    # On disconnect: clean up empty chats or generate titles
+    if _chat_store and bundle.chat_id:
+        try:
+            msg_count: int = await _chat_store.get_message_count(bundle.chat_id)
+            if msg_count == 0:
+                # Delete empty auto-created chats
+                await _chat_store.delete_chat(bundle.chat_id)
+                logger.info("Cleaned up empty chat %s on disconnect", bundle.chat_id)
+            else:
+                await _maybe_generate_title(bundle, api_key)
+        except Exception as cleanup_err:
+            logger.warning("Chat cleanup on disconnect failed: %s", str(cleanup_err))
+
+
+# ---------------------------------------------------------------------------
+# Chat management WS handlers
+# ---------------------------------------------------------------------------
+
+async def _handle_new_chat(
+    ws: WebSocket,
+    bundle: SessionBundle,
+    raw: dict[str, Any],
+    api_key: str,
+) -> None:
+    """Create a new chat in SQLite."""
+    if not _chat_store:
+        return
+
+    # Clean up previous empty chat (e.g. auto-created with 0 messages)
+    if bundle.chat_id:
+        try:
+            prev_count: int = await _chat_store.get_message_count(bundle.chat_id)
+            if prev_count == 0:
+                await _chat_store.delete_chat(bundle.chat_id)
+                logger.info("Cleaned up empty chat %s", bundle.chat_id)
+        except Exception:
+            pass
+
+    chat_type: str = raw.get("chatType", "text")
+    chat_id: str = str(uuid.uuid4())
+    key_hash: str = ChatStore.hash_api_key(api_key)
+    await _chat_store.create_chat(chat_id, chat_type, key_hash)
+    bundle.chat_id = chat_id
+    bundle.chat_type = chat_type
+    await ws.send_json({
+        "type": "chat_created",
+        "chatId": chat_id,
+        "chatType": chat_type,
+    })
+    logger.info("New chat created: %s (%s)", chat_id, chat_type)
+
+
+async def _handle_load_chat(
+    ws: WebSocket,
+    bundle: SessionBundle,
+    raw: dict[str, Any],
+) -> None:
+    """Load a chat and restore history."""
+    if not _chat_store:
+        return
+    chat_id: str = raw.get("chatId", "")
+    if not chat_id:
+        return
+
+    chat: dict[str, Any] = await _chat_store.get_chat(chat_id)
+    if not chat:
+        await ws.send_json({"type": "error", "message": "Chat not found"})
+        return
+
+    messages: list[dict[str, Any]] = await _chat_store.get_messages(chat_id)
+    bundle.chat_id = chat_id
+    bundle.chat_type = chat.get("chat_type", "text")
+
+    # Restore text_chat_history from stored messages
+    _restore_text_history(bundle, messages)
+
+    await ws.send_json({
+        "type": "chat_loaded",
+        "chatId": chat_id,
+        "chat": chat,
+        "messages": messages,
+    })
+    logger.info("Chat loaded: %s (%d messages)", chat_id, len(messages))
+
+
+async def _handle_list_chats(ws: WebSocket, api_key: str) -> None:
+    """List chats for the current user."""
+    if not _chat_store:
+        return
+    key_hash: str = ChatStore.hash_api_key(api_key)
+    chats: list[dict[str, Any]] = await _chat_store.list_chats(key_hash)
+    await ws.send_json({"type": "chat_list", "chats": chats})
+
+
+async def _handle_rename_chat(ws: WebSocket, raw: dict[str, Any]) -> None:
+    """Rename a chat."""
+    if not _chat_store:
+        return
+    chat_id: str = raw.get("chatId", "")
+    title: str = raw.get("title", "")
+    if chat_id and title:
+        await _chat_store.update_chat_title(chat_id, title)
+        await ws.send_json({
+            "type": "chat_renamed",
+            "chatId": chat_id,
+            "title": title,
+            "success": True,
+        })
+
+
+async def _handle_delete_chat(ws: WebSocket, raw: dict[str, Any]) -> None:
+    """Delete a chat."""
+    if not _chat_store:
+        return
+    chat_id: str = raw.get("chatId", "")
+    if chat_id:
+        await _chat_store.delete_chat(chat_id)
+        await ws.send_json({
+            "type": "chat_deleted",
+            "chatId": chat_id,
+            "success": True,
+        })
+
+
+# ---------------------------------------------------------------------------
+# Chat persistence helpers
+# ---------------------------------------------------------------------------
+
+def _restore_text_history(
+    bundle: SessionBundle, messages: list[dict[str, Any]]
+) -> None:
+    """Rebuild text_chat_history from stored messages."""
+    from google import genai
+
+    bundle.text_chat_history.clear()
+    for msg in messages:
+        role: str = msg.get("role", "user")
+        content: str = msg.get("content", "")
+        if not content:
+            continue
+        if role in ("user", "model"):
+            bundle.text_chat_history.append(
+                genai.types.Content(
+                    role=role,
+                    parts=[genai.types.Part.from_text(text=content)],
+                )
+            )
+    # Cap history
+    if len(bundle.text_chat_history) > MAX_HISTORY_TURNS:
+        bundle.text_chat_history = bundle.text_chat_history[-MAX_HISTORY_TURNS:]
+
+
+async def _maybe_generate_title(bundle: SessionBundle, api_key: str) -> None:
+    """Generate a title for the chat if it needs one and has enough messages."""
+    if not _chat_store or not bundle.chat_id:
+        return
+    needs: bool = await _chat_store.needs_title(bundle.chat_id)
+    if not needs:
+        return
+    msg_count: int = await _chat_store.get_message_count(bundle.chat_id)
+    if msg_count < 2:  # Need at least 1 exchange
+        return
+    await _generate_and_set_title(bundle, api_key)
+
+
+async def _generate_and_set_title(bundle: SessionBundle, api_key: str) -> None:
+    """Call Gemini to generate a short chat title, update SQLite, notify frontend."""
+    if not _chat_store or not bundle.chat_id:
+        return
+
+    messages: list[dict[str, Any]] = await _chat_store.get_messages(
+        bundle.chat_id, limit=TITLE_GEN_THRESHOLD
+    )
+    if not messages:
+        return
+
+    # Build a transcript snippet
+    transcript: str = "\n".join(
+        f"{m['role'].upper()}: {m['content'][:200]}" for m in messages if m.get("content")
+    )
+
+    from google import genai
+
+    try:
+        client: genai.Client = genai.Client(
+            api_key=api_key, http_options={"timeout": 10000}
+        )
+        response = await client.aio.models.generate_content(
+            model=TITLE_GEN_MODEL,
+            contents=f"Generate a concise 3-5 word title for this conversation. "
+            f"Return ONLY the title, nothing else.\n\n{transcript}",
+            config=genai.types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=20,
+            ),
+        )
+        title: str = response.text.strip().strip('"').strip("'")[:60]
+        if title:
+            await _chat_store.update_chat_title(bundle.chat_id, title)
+            if bundle.ws:
+                try:
+                    await bundle.ws.send_json({
+                        "type": "chat_title_updated",
+                        "chatId": bundle.chat_id,
+                        "title": title,
+                    })
+                except Exception:
+                    pass
+            logger.info("Generated title for chat %s: %s", bundle.chat_id, title)
+    except Exception as e:
+        logger.warning("Title generation failed: %s", str(e))
+
 
 # ---------------------------------------------------------------------------
 # Paper context loading
@@ -573,6 +860,34 @@ async def handle_paper_load(
 
     logger.info("Paper loaded successfully: %s", metadata.get("title", paper_key))
 
+    # Auto-index paper into ChromaDB for semantic search
+    if bundle.embedding_service and fulltext:
+        try:
+            asyncio.create_task(
+                bundle.embedding_service.index_paper(
+                    item_key=paper_key,
+                    title=metadata.get("title", ""),
+                    authors=", ".join(metadata.get("authors", [])),
+                    year=str(metadata.get("year", "")),
+                    abstract=metadata.get("abstract", ""),
+                    fulltext=fulltext,
+                )
+            )
+            logger.info("Auto-indexing paper %s into ChromaDB", paper_key)
+        except Exception as idx_err:
+            logger.warning("Auto-index failed (non-fatal): %s", str(idx_err))
+
+    # Track mode transition
+    if _chat_store and bundle.chat_id:
+        try:
+            await _chat_store.add_transition(
+                bundle.chat_id, "lobby", "paper",
+                paper_title=metadata.get("title", ""),
+                paper_key=paper_key,
+            )
+        except Exception:
+            pass
+
 
 # ---------------------------------------------------------------------------
 # Switch back to lobby mode
@@ -593,6 +908,13 @@ async def handle_switch_to_lobby(
         )
     )
     logger.info("Switched back to lobby mode")
+
+    # Track mode transition
+    if _chat_store and bundle.chat_id:
+        try:
+            await _chat_store.add_transition(bundle.chat_id, "paper", "lobby")
+        except Exception:
+            pass
 
 
 # ---------------------------------------------------------------------------
@@ -659,8 +981,15 @@ async def handle_text_message(
             all_tool_funcs: list[Any] = []
             tool_map: dict[str, Any] = {}
             if model_supports_tools:
-                zotero_tool_funcs: list[Any] = create_zotero_tools(ws, bundle.zotero_ctx)
+                zotero_tool_funcs: list[Any] = create_zotero_tools(
+                    ws, bundle.zotero_ctx,
+                    embedding_service=bundle.embedding_service,
+                )
                 local_tool_funcs: list[Any] = [search_academic_papers, get_paper_recommendations]
+                if bundle.embedding_service:
+                    local_tool_funcs.append(
+                        create_semantic_search_tool(bundle.embedding_service)
+                    )
                 web_search_fn = create_web_search_tool(api_key)
                 all_tool_funcs = zotero_tool_funcs + local_tool_funcs + [web_search_fn]
                 tool_map = {func.__name__: func for func in all_tool_funcs}
@@ -689,8 +1018,54 @@ async def handle_text_message(
                 parts=[genai.types.Part.from_text(text=content)],
             )
 
+            # Persist user message
+            if _chat_store and bundle.chat_id:
+                try:
+                    _session_mode: str = bundle.session.state.get("session_mode", "lobby")
+                    await _chat_store.add_message(
+                        bundle.chat_id, "user", content,
+                        session_mode=_session_mode,
+                    )
+                except Exception as persist_err:
+                    logger.warning("Failed to persist user text message: %s", str(persist_err))
+
+            # RAG: retrieve relevant chunks when in paper mode
+            rag_context: str = ""
+            if (
+                bundle.embedding_service
+                and bundle.session.state.get("session_mode") == "paper"
+                and content
+            ):
+                try:
+                    paper_ctx_state: dict[str, Any] = bundle.session.state.get("paper_context", {})
+                    paper_key_rag: str = paper_ctx_state.get("pdf_attachment_key", "")
+                    if paper_key_rag:
+                        rag_hits: list[dict[str, Any]] = await bundle.embedding_service.search(
+                            query=content, n_results=RAG_TOP_K, item_key=paper_key_rag
+                        )
+                        if rag_hits:
+                            rag_snippets: list[str] = [
+                                f"[Chunk {h.get('chunk_index', '?')}]: {h['text'][:500]}"
+                                for h in rag_hits
+                            ]
+                            rag_context = (
+                                "\n\n[RELEVANT CONTEXT FROM PAPER]\n"
+                                + "\n---\n".join(rag_snippets)
+                                + "\n[END CONTEXT]\n\n"
+                            )
+                except Exception as rag_err:
+                    logger.warning("RAG retrieval failed (non-fatal): %s", str(rag_err))
+
             # Seed from persistent history + new message
-            context_contents = list(bundle.text_chat_history) + [new_user_msg]
+            if rag_context:
+                # Prepend RAG context to user message
+                rag_msg: genai.types.Content = genai.types.Content(
+                    role="user",
+                    parts=[genai.types.Part.from_text(text=rag_context + content)],
+                )
+                context_contents = list(bundle.text_chat_history) + [rag_msg]
+            else:
+                context_contents = list(bundle.text_chat_history) + [new_user_msg]
 
             # Cap history to avoid exceeding context window
             if len(context_contents) > MAX_HISTORY_TURNS:
@@ -893,6 +1268,20 @@ async def handle_text_message(
 
             # Persist conversation history for next call
             bundle.text_chat_history = context_contents
+
+            # Persist model response to SQLite
+            if _chat_store and bundle.chat_id and full_text:
+                try:
+                    _session_mode_resp: str = bundle.session.state.get("session_mode", "lobby")
+                    await _chat_store.add_message(
+                        bundle.chat_id, "model", full_text,
+                        session_mode=_session_mode_resp,
+                        model_used=used_model,
+                    )
+                    # Check if title needs generating
+                    await _maybe_generate_title(bundle, api_key)
+                except Exception as persist_err:
+                    logger.warning("Failed to persist model text response: %s", str(persist_err))
 
             await ws.send_json({
                 "type": "text_response_done",
