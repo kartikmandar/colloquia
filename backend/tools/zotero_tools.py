@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from config import ZOTERO_TIMEOUT
+from config import ZOTERO_TIMEOUT, ZOTERO_TIMEOUT_SLOW
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -41,8 +41,10 @@ async def _delegate_to_frontend(
     action: str,
     params: dict[str, Any],
     ctx: ZoteroToolContext,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
     """Send a Zotero action to the frontend, wait for result."""
+    effective_timeout: float = timeout if timeout is not None else ZOTERO_TIMEOUT
     request_id: str = str(uuid.uuid4())
     loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
     future: asyncio.Future[dict[str, Any]] = loop.create_future()
@@ -56,11 +58,11 @@ async def _delegate_to_frontend(
     })
 
     try:
-        result: dict[str, Any] = await asyncio.wait_for(future, timeout=ZOTERO_TIMEOUT)
+        result: dict[str, Any] = await asyncio.wait_for(future, timeout=effective_timeout)
         return result
     except asyncio.TimeoutError:
         raise ToolError(
-            f"Zotero plugin didn't respond within {ZOTERO_TIMEOUT}s — "
+            f"Zotero plugin didn't respond within {effective_timeout}s — "
             f"is Zotero running? Is the tab in the foreground?"
         )
     finally:
@@ -323,7 +325,7 @@ def create_zotero_tools(
             params["abstract"] = abstract
         if collectionKey:
             params["collectionKey"] = collectionKey
-        return await _delegate_to_frontend(ws, "addPaper", params, ctx)
+        return await _delegate_to_frontend(ws, "addPaper", params, ctx, timeout=ZOTERO_TIMEOUT_SLOW)
 
     async def get_item_details(itemKey: str) -> dict[str, Any]:
         """Get complete metadata for a specific Zotero item by its key.
@@ -352,7 +354,7 @@ def create_zotero_tools(
             maxChars: Maximum characters to return (0 = full text, up to 100k). Useful for getting just the beginning of a paper.
         """
         result: dict[str, Any] = await _delegate_to_frontend(
-            ws, "getFulltext", {"itemKey": itemKey}, ctx
+            ws, "getFulltext", {"itemKey": itemKey}, ctx, timeout=ZOTERO_TIMEOUT_SLOW
         )
         content: str = result.get("content", "")
         if not content:

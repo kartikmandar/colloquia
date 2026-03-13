@@ -14,6 +14,9 @@ APP_NAME: str = "colloquia-app"
 # Session defaults
 MAX_RECONNECTS: int = 5
 ZOTERO_TIMEOUT: float = 10.0
+ZOTERO_TIMEOUT_SLOW: float = 30.0     # for addPaper, getFulltext
+NETWORK_RETRY_MAX: int = 2            # max retries for transient errors
+NETWORK_RETRY_DELAY: float = 1.0      # base delay (seconds) between retries
 TEXT_TOKEN_BUDGET: int = 30000
 MAX_FULLTEXT_CHARS: int = 100_000
 MAX_HISTORY_TURNS: int = 20  # ~10 user-model exchanges

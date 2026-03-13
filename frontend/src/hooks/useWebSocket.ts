@@ -442,8 +442,18 @@ export function useWebSocket({
           setContextUsage(data);
           break;
 
-        case "error":
-          toast.error(data.message || "An error occurred");
+        case "error": {
+          const errorCode: string | undefined = data.code;
+          const errorMsg: string = data.message || "An error occurred";
+          if (errorCode === "network") {
+            toast.error(`Connection issue: ${errorMsg}`, { duration: 6000 });
+          } else if (errorCode === "auth") {
+            toast.error(`API key error: ${errorMsg}`, { duration: 8000 });
+          } else if (errorCode === "rate_limit") {
+            toast.error(errorMsg, { duration: 5000 });
+          } else {
+            toast.error(errorMsg);
+          }
           // Clear any in-progress streaming state
           setMessages((prev: ChatMessage[]) => {
             const updated: ChatMessage[] = [...prev];
@@ -453,8 +463,9 @@ export function useWebSocket({
             }
             return updated;
           });
-          addMessage("model", `Error: ${data.message}`, "text");
+          addMessage("model", `Error: ${errorMsg}`, "text");
           break;
+        }
 
         case "session_status": {
           const ss: SessionStatusMessage = data;

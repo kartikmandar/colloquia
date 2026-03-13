@@ -21,12 +21,15 @@ from chat_store import ChatStore
 from config import (
     MAX_HISTORY_TURNS,
     MAX_RECONNECTS,
+    NETWORK_RETRY_DELAY,
+    NETWORK_RETRY_MAX,
     RAG_TOP_K,
     TEXT_MODEL,
     TEXT_MODEL_FALLBACK,
     TITLE_GEN_MODEL,
     TITLE_GEN_THRESHOLD,
 )
+from error_utils import classify_error, retry_async
 from model_registry import MODEL_REGISTRY, get_registry_json, ModelEntry
 from prompts.lobby import LOBBY_SYSTEM_PROMPT
 from prompts.paper import build_paper_prompt
@@ -1097,44 +1100,69 @@ async def handle_text_message(
                             config_kwargs["automatic_function_calling"] = (
                                 genai.types.AutomaticFunctionCallingConfig(disable=True)
                             )
-                        stream = await client.aio.models.generate_content_stream(
-                            model=model_name,
-                            contents=context_contents,
-                            config=genai.types.GenerateContentConfig(**config_kwargs),
-                        )
 
-                        async for chunk in stream:
-                            if not chunk.candidates:
-                                continue
-                            for part in chunk.candidates[0].content.parts:
-                                response_parts.append(part)
-                                if part.function_call:
-                                    function_calls.append(part.function_call)
-                                elif part.text:
-                                    turn_text += part.text
-                                    full_text += part.text
-                                    await ws.send_json({
-                                        "type": "text_response_chunk",
-                                        "content": part.text,
-                                        "model": model_name,
-                                    })
-                                elif hasattr(part, 'inline_data') and part.inline_data and part.inline_data.data:
-                                    mime: str = part.inline_data.mime_type or ""
-                                    encoded_media: str = base64.b64encode(part.inline_data.data).decode()
-                                    if mime.startswith("image/"):
+                        # Wrap streaming in retry for transient errors (SSL, 503)
+                        async def _do_stream() -> None:
+                            nonlocal full_text
+                            response_parts.clear()
+                            function_calls.clear()
+
+                            stream = await client.aio.models.generate_content_stream(
+                                model=model_name,
+                                contents=context_contents,
+                                config=genai.types.GenerateContentConfig(**config_kwargs),
+                            )
+
+                            async for chunk in stream:
+                                if not chunk.candidates:
+                                    continue
+                                for part in chunk.candidates[0].content.parts:
+                                    response_parts.append(part)
+                                    if part.function_call:
+                                        function_calls.append(part.function_call)
+                                    elif part.text:
+                                        turn_text_ref[0] += part.text
+                                        full_text += part.text
                                         await ws.send_json({
-                                            "type": "image_response",
-                                            "data": encoded_media,
-                                            "mimeType": mime,
+                                            "type": "text_response_chunk",
+                                            "content": part.text,
                                             "model": model_name,
                                         })
-                                    elif mime.startswith("video/"):
-                                        await ws.send_json({
-                                            "type": "video_response",
-                                            "data": encoded_media,
-                                            "mimeType": mime,
-                                            "model": model_name,
-                                        })
+                                    elif hasattr(part, 'inline_data') and part.inline_data and part.inline_data.data:
+                                        mime: str = part.inline_data.mime_type or ""
+                                        encoded_media: str = base64.b64encode(part.inline_data.data).decode()
+                                        if mime.startswith("image/"):
+                                            await ws.send_json({
+                                                "type": "image_response",
+                                                "data": encoded_media,
+                                                "mimeType": mime,
+                                                "model": model_name,
+                                            })
+                                        elif mime.startswith("video/"):
+                                            await ws.send_json({
+                                                "type": "video_response",
+                                                "data": encoded_media,
+                                                "mimeType": mime,
+                                                "model": model_name,
+                                            })
+
+                        # Use mutable ref for turn_text so retry resets work
+                        turn_text_ref: list[str] = [""]
+
+                        def _on_retry(attempt: int, exc: Exception) -> None:
+                            nonlocal full_text
+                            # Reset state accumulated during failed attempt
+                            turn_text_ref[0] = ""
+                            full_text = full_text  # keep accumulated from prior turns
+                            logger.info("Retrying stream (attempt %d) after: %s", attempt, str(exc)[:200])
+
+                        await retry_async(
+                            _do_stream,
+                            max_retries=NETWORK_RETRY_MAX,
+                            base_delay=NETWORK_RETRY_DELAY,
+                            on_retry=_on_retry,
+                        )
+                        turn_text = turn_text_ref[0]
 
                         # If no function calls, we're done
                         if not function_calls:
@@ -1305,9 +1333,11 @@ async def handle_text_message(
         except Exception as e:
             logger.error("Text message handling failed: %s", str(e))
             try:
+                category, user_msg = classify_error(e)
                 await ws.send_json({
                     "type": "error",
-                    "message": f"Text response failed: {str(e)}",
+                    "message": user_msg,
+                    "code": category,
                 })
             except Exception:
                 logger.warning("Could not send error to frontend — WebSocket already closed")
@@ -1336,12 +1366,16 @@ async def handle_imagen_request(
             http_options={"timeout": 60000},
         )
 
-        response = await client.aio.models.generate_images(
-            model=model_name,
-            prompt=prompt,
-            config=genai.types.GenerateImagesConfig(
-                number_of_images=1,
+        response = await retry_async(
+            lambda: client.aio.models.generate_images(
+                model=model_name,
+                prompt=prompt,
+                config=genai.types.GenerateImagesConfig(
+                    number_of_images=1,
+                ),
             ),
+            max_retries=NETWORK_RETRY_MAX,
+            base_delay=NETWORK_RETRY_DELAY,
         )
 
         if response.generated_images:
@@ -1367,7 +1401,8 @@ async def handle_imagen_request(
         try:
             await ws.send_json({
                 "type": "error",
-                "message": f"Image generation failed: {str(e)}",
+                "message": classify_error(e)[1],
+                "code": classify_error(e)[0],
             })
         except Exception:
             pass
@@ -1401,9 +1436,13 @@ async def handle_veo_request(
             http_options={"timeout": 300000},
         )
 
-        operation = await client.aio.models.generate_videos(
-            model=model_name,
-            prompt=prompt,
+        operation = await retry_async(
+            lambda: client.aio.models.generate_videos(
+                model=model_name,
+                prompt=prompt,
+            ),
+            max_retries=NETWORK_RETRY_MAX,
+            base_delay=NETWORK_RETRY_DELAY,
         )
 
         # Poll until done
@@ -1469,7 +1508,8 @@ async def handle_veo_request(
         try:
             await ws.send_json({
                 "type": "error",
-                "message": f"Video generation failed: {str(e)}",
+                "message": classify_error(e)[1],
+                "code": classify_error(e)[0],
             })
         except Exception:
             pass
@@ -1497,19 +1537,23 @@ async def handle_tts_request(
             http_options={"timeout": 60000},
         )
 
-        response = await client.aio.models.generate_content(
-            model=model_name,
-            contents=text,
-            config=genai.types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=genai.types.SpeechConfig(
-                    voice_config=genai.types.VoiceConfig(
-                        prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
-                            voice_name="Kore",
+        response = await retry_async(
+            lambda: client.aio.models.generate_content(
+                model=model_name,
+                contents=text,
+                config=genai.types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=genai.types.SpeechConfig(
+                        voice_config=genai.types.VoiceConfig(
+                            prebuilt_voice_config=genai.types.PrebuiltVoiceConfig(
+                                voice_name="Kore",
+                            ),
                         ),
                     ),
                 ),
             ),
+            max_retries=NETWORK_RETRY_MAX,
+            base_delay=NETWORK_RETRY_DELAY,
         )
 
         if response.candidates:
@@ -1533,7 +1577,8 @@ async def handle_tts_request(
         try:
             await ws.send_json({
                 "type": "error",
-                "message": f"Text-to-speech failed: {str(e)}",
+                "message": classify_error(e)[1],
+                "code": classify_error(e)[0],
             })
         except Exception:
             pass
